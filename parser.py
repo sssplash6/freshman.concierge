@@ -176,7 +176,6 @@ def parse_consults_grid(rows: list[list[str]]) -> list[dict]:
 
         staff = extract_staff_name(first)
         duration = _extract_duration(first)
-        seen_cohorts: set[str] = set()
 
         for i, cohort_raw in enumerate(row[1:]):
             cohort_raw = str(cohort_raw).strip() if cohort_raw else ""
@@ -186,9 +185,6 @@ def parse_consults_grid(rows: list[list[str]]) -> list[dict]:
             if not week_date:
                 continue
             cohort = _normalize_cohort(cohort_raw)
-            if cohort in seen_cohorts:
-                continue
-            seen_cohorts.add(cohort)
             events.append({
                 "cohort": cohort,
                 "type": "consult",

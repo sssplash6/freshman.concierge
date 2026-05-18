@@ -73,14 +73,18 @@ def test_parse_consults_grid():
         ["Rustam (30-45 minutes)", "November", "", "April Offline"],
     ]
     events = parse_consults_grid(rows)
-    assert len(events) == 5
+    assert len(events) == 6
     tyler_events = [e for e in events if e["staff_name"] == "Tyler"]
-    assert len(tyler_events) == 2
+    assert len(tyler_events) == 3
     assert all(e["type"] == "consult" for e in tyler_events)
     assert all(e["event_date"] is None for e in tyler_events)
     assert tyler_events[0]["week_start"] == "2026-04-13"
     assert tyler_events[0]["cohort"] == "February"
     assert tyler_events[0]["duration_min"] == 45
+    assert tyler_events[1]["week_start"] == "2026-04-20"
+    assert tyler_events[1]["cohort"] == "November"
+    assert tyler_events[2]["week_start"] == "2026-04-27"
+    assert tyler_events[2]["cohort"] == "February"
 
     valera_events = [e for e in events if e["staff_name"] == "Valera"]
     assert len(valera_events) == 1
