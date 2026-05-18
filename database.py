@@ -1,7 +1,8 @@
 # database.py
 import os
 import aiosqlite
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 DB_PATH = os.environ.get("DB_PATH", "/tmp/concierge_bot.db")
 
@@ -89,6 +90,7 @@ async def get_all_staff() -> list[dict]:
 
 async def replace_events(events: list[dict]) -> None:
     async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("BEGIN")
         await db.execute("DELETE FROM events")
         await db.executemany(
             """
@@ -126,7 +128,7 @@ async def get_all_events() -> list[dict]:
 
 
 async def get_upcoming_events_for_staff(display_name: str, limit: int = 5) -> list[dict]:
-    today = date.today().isoformat()
+    today = datetime.now(ZoneInfo("Asia/Tashkent")).date().isoformat()
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(

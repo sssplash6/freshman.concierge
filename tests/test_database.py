@@ -68,15 +68,17 @@ async def test_reminder_not_sent_twice(db):
 
 @pytest.mark.asyncio
 async def test_get_upcoming_events(db):
+    from datetime import date, timedelta
     database.DB_PATH = db
     # Create a fixture with a future date for this test
+    future_date = (date.today() + timedelta(days=30)).isoformat()
     future_events = [
         {
             "cohort": "April Online",
             "type": "lecture",
             "title": "Lecture #3 (Narrative)",
             "staff_name": "Tyler",
-            "event_date": "2026-06-09",  # Future date
+            "event_date": future_date,
             "week_start": None,
             "event_time": "19:30",
             "duration_min": None,
@@ -87,3 +89,34 @@ async def test_get_upcoming_events(db):
     upcoming = await database.get_upcoming_events_for_staff("Tyler", limit=5)
     assert len(upcoming) == 1
     assert upcoming[0]["title"] == "Lecture #3 (Narrative)"
+
+
+@pytest.mark.asyncio
+async def test_get_all_staff(db):
+    database.DB_PATH = db
+    await database.upsert_staff(chat_id=101, username="u1", display_name="Tyler")
+    await database.upsert_staff(chat_id=102, username="u2", display_name="Valera")
+    staff_list = await database.get_all_staff()
+    assert len(staff_list) == 2
+    names = {s["display_name"] for s in staff_list}
+    assert names == {"Tyler", "Valera"}
+
+
+@pytest.mark.asyncio
+async def test_log_sync_and_get_last(db):
+    database.DB_PATH = db
+    await database.log_sync(42)
+    await database.log_sync(99)
+    last = await database.get_last_sync()
+    assert last is not None
+    assert last["event_count"] == 99
+
+
+@pytest.mark.asyncio
+async def test_replace_events_clears_all(db):
+    database.DB_PATH = db
+    from tests.conftest import FIXTURE_LECTURES, FIXTURE_CONSULTS
+    await database.replace_events(FIXTURE_LECTURES)
+    await database.replace_events(FIXTURE_CONSULTS)
+    all_events = await database.get_all_events()
+    assert len(all_events) == len(FIXTURE_CONSULTS)
