@@ -53,23 +53,25 @@ def format_reminder_message(event: dict) -> str:
             date=d.strftime("%B %-d"),
             time=event["event_time"],
         )
-    elif event.get("event_date"):
-        d = date.fromisoformat(event["event_date"])
-        return msg.REMINDER_CONSULT_DATE.format(
-            title=event["title"],
-            cohort=event["cohort"],
-            weekday=d.strftime("%A"),
-            date=d.strftime("%B %-d"),
-            duration=event.get("duration_min") or "?",
-        )
-    else:
-        d = date.fromisoformat(event["week_start"])
-        return msg.REMINDER_CONSULT_WEEK.format(
-            title=event["title"],
-            cohort=event["cohort"],
-            date=d.strftime("%B %-d"),
-            duration=event.get("duration_min") or "?",
-        )
+    elif event["type"] == "consult":
+        if event.get("event_date"):
+            d = date.fromisoformat(event["event_date"])
+            return msg.REMINDER_CONSULT_DATE.format(
+                title=event["title"],
+                cohort=event["cohort"],
+                weekday=d.strftime("%A"),
+                date=d.strftime("%B %-d"),
+                duration=event.get("duration_min") or "?",
+            )
+        else:
+            d = date.fromisoformat(event["week_start"])
+            return msg.REMINDER_CONSULT_WEEK.format(
+                title=event["title"],
+                cohort=event["cohort"],
+                date=d.strftime("%B %-d"),
+                duration=event.get("duration_min") or "?",
+            )
+    raise ValueError(f"Unknown event type: {event['type']!r}")
 
 
 async def check_and_send_reminders(bot: Bot) -> None:
@@ -82,10 +84,14 @@ async def check_and_send_reminders(bot: Bot) -> None:
         reminder_dt = compute_reminder_dt(event)
         if reminder_dt is None:
             continue
-        # Fire if within a 2-minute window of the reminder time
-        if not (reminder_dt <= now <= reminder_dt + timedelta(minutes=2)):
+        # Fire if past reminder time and within a 30-minute grace window (idempotency prevents duplicates)
+        if not (reminder_dt <= now <= reminder_dt + timedelta(minutes=30)):
             continue
-        text = format_reminder_message(event)
+        try:
+            text = format_reminder_message(event)
+        except Exception:
+            logger.exception("Failed to format reminder for event %d", event["id"])
+            continue
         for staff in staff_list:
             if staff["display_name"] != event["staff_name"]:
                 continue
@@ -106,11 +112,14 @@ async def sync_schedule(bot: Bot) -> None:
     from sheets_parser import fetch_all_events
     try:
         events = fetch_all_events()
+        if not events:
+            logger.warning("Sync returned 0 events — retaining existing schedule.")
+            return
         await db.replace_events(events)
         await db.log_sync(len(events))
         logger.info("Schedule synced: %d events loaded.", len(events))
-    except Exception as e:
-        logger.error("Schedule sync failed: %s", e)
+    except Exception:
+        logger.exception("Schedule sync failed")
 
 
 async def init_scheduler(bot: Bot) -> None:
@@ -132,5 +141,6 @@ async def init_scheduler(bot: Bot) -> None:
         id="sheet_sync",
         replace_existing=True,
     )
-    scheduler.start()
+    if not scheduler.running:
+        scheduler.start()
     logger.info("Scheduler started.")
