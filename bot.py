@@ -1,4 +1,5 @@
 # bot.py
+import asyncio
 import logging
 from datetime import date
 
@@ -18,19 +19,23 @@ logger = logging.getLogger(__name__)
 
 
 def _build_name_keyboard() -> InlineKeyboardMarkup:
-    """Build an inline keyboard with one button per known name."""
     buttons = [
         InlineKeyboardButton(name, callback_data=f"register:{name}")
         for name in KNOWN_NAMES
     ]
-    # Two buttons per row
     rows = [buttons[i : i + 2] for i in range(0, len(buttons), 2)]
     return InlineKeyboardMarkup(rows)
 
 
+async def _handle_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.exception("Unhandled bot error", exc_info=context.error)
+
+
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    chat_id = update.effective_chat.id
-    staff = await db.get_staff(chat_id)
+    if not update.effective_user or not update.message:
+        return
+    user_id = update.effective_user.id
+    staff = await db.get_staff(user_id)
     keyboard = _build_name_keyboard()
     if staff:
         await update.message.reply_text(
@@ -55,8 +60,10 @@ async def cb_register(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 async def cmd_upcoming(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    chat_id = update.effective_chat.id
-    staff = await db.get_staff(chat_id)
+    if not update.effective_user or not update.message:
+        return
+    user_id = update.effective_user.id
+    staff = await db.get_staff(user_id)
     if not staff:
         await update.message.reply_text(msg.NOT_REGISTERED)
         return
@@ -68,59 +75,60 @@ async def cmd_upcoming(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     lines = [msg.UPCOMING_HEADER.format(count=len(events))]
     for e in events:
-        event_type = e.get("type")
-        event_date_str = e.get("event_date")
-        week_start_str = e.get("week_start")
-
-        if event_type == "lecture":
-            d = date.fromisoformat(event_date_str)
-            lines.append(
-                msg.UPCOMING_LECTURE.format(
-                    title=e["title"],
-                    cohort=e["cohort"],
-                    weekday=d.strftime("%A"),
-                    date=d.strftime("%B %-d"),
-                    time=e["event_time"],
+        try:
+            if e.get("type") == "lecture":
+                d = date.fromisoformat(e["event_date"])
+                lines.append(
+                    msg.UPCOMING_LECTURE.format(
+                        title=e["title"],
+                        cohort=e["cohort"],
+                        weekday=d.strftime("%A"),
+                        date=d.strftime("%B %-d"),
+                        time=e["event_time"],
+                    )
                 )
-            )
-        elif event_date_str:
-            # dated consult
-            d = date.fromisoformat(event_date_str)
-            lines.append(
-                msg.UPCOMING_CONSULT_DATE.format(
-                    title=e["title"],
-                    cohort=e["cohort"],
-                    weekday=d.strftime("%A"),
-                    date=d.strftime("%B %-d"),
-                    duration=e.get("duration_min") or "?",
+            elif e.get("event_date"):
+                d = date.fromisoformat(e["event_date"])
+                lines.append(
+                    msg.UPCOMING_CONSULT_DATE.format(
+                        title=e["title"],
+                        cohort=e["cohort"],
+                        weekday=d.strftime("%A"),
+                        date=d.strftime("%B %-d"),
+                        duration=e.get("duration_min") or "?",
+                    )
                 )
-            )
-        else:
-            # week consult
-            d = date.fromisoformat(week_start_str)
-            lines.append(
-                msg.UPCOMING_CONSULT_WEEK.format(
-                    title=e["title"],
-                    cohort=e["cohort"],
-                    date=d.strftime("%B %-d"),
-                    duration=e.get("duration_min") or "?",
+            else:
+                d = date.fromisoformat(e["week_start"])
+                lines.append(
+                    msg.UPCOMING_CONSULT_WEEK.format(
+                        title=e["title"],
+                        cohort=e["cohort"],
+                        date=d.strftime("%B %-d"),
+                        duration=e.get("duration_min") or "?",
+                    )
                 )
-            )
+        except (ValueError, KeyError) as exc:
+            logger.warning("Could not format event %s: %s", e.get("id"), exc)
 
     await update.message.reply_text("".join(lines), parse_mode="Markdown")
 
 
 async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    chat_id = update.effective_chat.id
-    staff = await db.get_staff(chat_id)
+    if not update.effective_user or not update.message:
+        return
+    user_id = update.effective_user.id
+    staff = await db.get_staff(user_id)
     if not staff:
         await update.message.reply_text(msg.NOT_REGISTERED)
         return
-    await db.delete_staff(chat_id)
+    await db.delete_staff(user_id)
     await update.message.reply_text(msg.UNREGISTERED)
 
 
 async def cmd_reload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message:
+        return
     if update.effective_chat.id != ADMIN_CHAT_ID:
         await update.message.reply_text(msg.ADMIN_ONLY)
         return
@@ -129,21 +137,21 @@ async def cmd_reload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     try:
         from sheets_parser import fetch_all_events
 
-        events = fetch_all_events()
+        events = await asyncio.to_thread(fetch_all_events)
         if not events:
-            await update.message.reply_text(
-                "No events returned from sheet — existing schedule retained."
-            )
+            await update.message.reply_text(msg.RELOAD_EMPTY)
             return
         await db.replace_events(events)
         await db.log_sync(len(events))
         await update.message.reply_text(msg.RELOAD_DONE.format(count=len(events)))
-    except Exception as e:
+    except Exception:
         logger.exception("Reload failed")
-        await update.message.reply_text(msg.RELOAD_FAILED.format(error=str(e)))
+        await update.message.reply_text(msg.RELOAD_FAILED)
 
 
 async def cmd_sync_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message:
+        return
     if update.effective_chat.id != ADMIN_CHAT_ID:
         await update.message.reply_text(msg.ADMIN_ONLY)
         return
@@ -161,7 +169,6 @@ async def cmd_sync_status(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 def build_app() -> Application:
-    """Build and return the Telegram Application with all handlers registered."""
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", cmd_start))
@@ -170,5 +177,6 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("reload", cmd_reload))
     app.add_handler(CommandHandler("sync_status", cmd_sync_status))
     app.add_handler(CallbackQueryHandler(cb_register, pattern=r"^register:"))
+    app.add_error_handler(_handle_error)
 
     return app

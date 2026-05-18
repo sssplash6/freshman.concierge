@@ -71,7 +71,8 @@ REMINDER_CONSULT_WEEK = (
 
 RELOAD_STARTED = "🔄 Syncing schedule from Google Sheets..."
 RELOAD_DONE = "✅ Sync complete. {count} events loaded."
-RELOAD_FAILED = "❌ Sync failed: {error}"
+RELOAD_EMPTY = "No events returned from sheet — existing schedule retained."
+RELOAD_FAILED = "❌ Sync failed. Check server logs for details."
 
 SYNC_STATUS_NONE = "No sync has been run yet."
 SYNC_STATUS = (
