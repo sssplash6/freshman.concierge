@@ -5,7 +5,7 @@ import signal
 import database as db
 from bot import build_app
 from sheets_parser import fetch_all_events
-from scheduler import init_scheduler
+from scheduler import init_scheduler, get_scheduler
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,9 +43,12 @@ async def main() -> None:
         await bot_app.start()
         await bot_app.updater.start_polling(drop_pending_updates=True)
         logger.info("Concierge bot polling started.")
-        await stop_event.wait()
-        await bot_app.updater.stop()
-        await bot_app.stop()
+        try:
+            await stop_event.wait()
+        finally:
+            get_scheduler().shutdown(wait=False)
+            await bot_app.updater.stop()
+            await bot_app.stop()
 
 
 if __name__ == "__main__":
