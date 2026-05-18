@@ -3,12 +3,13 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
-from parser import (
+from sheets_parser import (
     parse_date_string,
     parse_time_string,
     extract_staff_name,
     parse_lectures_sheet,
     parse_consults_grid,
+    _extract_duration,
 )
 
 
@@ -39,6 +40,13 @@ def test_extract_staff_name():
     assert extract_staff_name("Dr. Lyusyena") == "Lyusyena"
     assert extract_staff_name("Rustam (30-45 minutes)") == "Rustam"
     assert extract_staff_name("Alisher / Nigel") == "Alisher"
+
+
+def test_extract_duration():
+    assert _extract_duration("Tyler (45 minutes)") == 45
+    assert _extract_duration("Rustam (30-45 minutes)") == 45
+    assert _extract_duration("Lyusyena (45-60 mins)") == 60
+    assert _extract_duration("no duration here") is None
 
 
 def test_parse_lectures_sheet_april_online():

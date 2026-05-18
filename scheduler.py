@@ -103,7 +103,7 @@ async def check_and_send_reminders(bot: Bot) -> None:
 
 async def sync_schedule(bot: Bot) -> None:
     """Re-fetch Google Sheets and replace events in DB."""
-    from parser import fetch_all_events
+    from sheets_parser import fetch_all_events
     try:
         events = fetch_all_events()
         await db.replace_events(events)

@@ -75,7 +75,7 @@ def parse_time_string(value: str | None) -> str | None:
 
 def _extract_duration(raw: str) -> int | None:
     """Extract minutes from '45 minutes' or '30-45 minutes' -> 45."""
-    m = re.search(r"(\d+)(?:-\d+)?\s*min", raw, re.IGNORECASE)
+    m = re.search(r"(?:\d+-)?(\d+)\s*min", raw, re.IGNORECASE)
     return int(m.group(1)) if m else None
 
 
@@ -209,7 +209,7 @@ def fetch_all_events() -> list[dict]:
     creds = Credentials.from_service_account_info(
         GOOGLE_SERVICE_ACCOUNT_JSON, scopes=_SCOPES
     )
-    gc = gspread.authorize(creds)
+    gc = gspread.Client(auth=creds)
     sh = gc.open_by_key(GOOGLE_SHEETS_ID)
 
     events: list[dict] = []
