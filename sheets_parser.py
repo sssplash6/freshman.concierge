@@ -234,7 +234,7 @@ def fetch_all_events() -> list[dict]:
     events: list[dict] = []
 
     try:
-        ws = sh.worksheet("2026 Lectures")
+        ws = sh.worksheet("[2026] Lectures")
         rows = ws.get_all_values()
         logger.info("2026 Lectures: %d rows. First row: %s", len(rows), rows[0] if rows else [])
         lecture_events = parse_lectures_sheet(rows)
@@ -244,7 +244,7 @@ def fetch_all_events() -> list[dict]:
         logger.error("Failed to parse 2026 Lectures: %s", e)
 
     try:
-        ws = sh.worksheet("2026 Consults")
+        ws = sh.worksheet("[2026] Consults")
         rows = ws.get_all_values()
         logger.info("2026 Consults: %d rows. First 3 rows: %s", len(rows), rows[:3] if rows else [])
         consult_events = parse_consults_grid(rows)
