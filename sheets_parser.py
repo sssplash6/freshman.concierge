@@ -228,6 +228,9 @@ def fetch_all_events() -> list[dict]:
     gc = gspread.Client(auth=creds)
     sh = gc.open_by_key(GOOGLE_SHEETS_ID)
 
+    all_titles = [ws.title for ws in sh.worksheets()]
+    logger.info("Available sheet tabs: %s", all_titles)
+
     events: list[dict] = []
 
     try:
