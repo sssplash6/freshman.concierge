@@ -37,14 +37,24 @@ def extract_staff_name(raw: str) -> str:
 
 
 def parse_date_string(value: str | None, year: int = 2026) -> str | None:
-    """Parse 'April 25 (Saturday)' or '2026-04-25' -> ISO date string."""
+    """Parse various date formats -> ISO date string."""
     if not value:
         return None
     value = str(value).strip()
     if not value:
         return None
-    if re.match(r"^\d{4}-\d{2}-\d{2}$", value):
-        return value
+    # ISO date or datetime: "2026-04-25" or "2026-04-25 00:00:00"
+    m = re.match(r"^(\d{4}-\d{2}-\d{2})", value)
+    if m:
+        return m.group(1)
+    # M/D/YYYY or MM/DD/YYYY: "5/1/2026"
+    m = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})$", value)
+    if m:
+        try:
+            return date(int(m.group(3)), int(m.group(1)), int(m.group(2))).isoformat()
+        except ValueError:
+            pass
+    # "Month Day (Weekday)" or "Month Day, Year": "April 25 (Saturday)", "May 1, 2026"
     m = re.match(r"([A-Za-z]+)\s+(\d+)", value)
     if m:
         month_name = m.group(1).lower()
@@ -158,13 +168,19 @@ def parse_consults_grid(rows: list[list[str]]) -> list[dict]:
     if not rows:
         return events
 
-    header = rows[0]
-    if not header or str(header[0]).strip() != "Weeks":
+    # Find the "Weeks" header row — may not be the first row
+    header_idx = None
+    for i, row in enumerate(rows):
+        if row and str(row[0]).strip() == "Weeks":
+            header_idx = i
+            break
+    if header_idx is None:
         return events
 
+    header = rows[header_idx]
     week_dates = [parse_date_string(str(cell).strip(), 2026) for cell in header[1:]]
 
-    for row in rows[1:]:
+    for row in rows[header_idx + 1:]:
         if not row or not row[0]:
             break
         first = str(row[0]).strip()
