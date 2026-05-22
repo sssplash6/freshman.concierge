@@ -1,30 +1,23 @@
 # bot.py
 import asyncio
+import html
 import logging
 from datetime import date
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+_e = html.escape
+
+from telegram import Update
 from telegram.ext import (
     Application,
-    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
 )
 
 import database as db
 import messages as msg
-from config import ADMIN_CHAT_ID, KNOWN_NAMES, TELEGRAM_BOT_TOKEN
+from config import ADMIN_CHAT_ID, STAFF_IDS, TELEGRAM_BOT_TOKEN
 
 logger = logging.getLogger(__name__)
-
-
-def _build_name_keyboard() -> InlineKeyboardMarkup:
-    buttons = [
-        InlineKeyboardButton(name, callback_data=f"register:{name}")
-        for name in KNOWN_NAMES
-    ]
-    rows = [buttons[i : i + 2] for i in range(0, len(buttons), 2)]
-    return InlineKeyboardMarkup(rows)
 
 
 async def _handle_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -35,28 +28,16 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_user or not update.message:
         return
     user_id = update.effective_user.id
-    staff = await db.get_staff(user_id)
-    keyboard = _build_name_keyboard()
-    if staff:
-        await update.message.reply_text(
-            msg.ALREADY_REGISTERED.format(name=staff["display_name"]),
-            reply_markup=keyboard,
-            parse_mode="Markdown",
-        )
-    else:
-        await update.message.reply_text(msg.WELCOME, reply_markup=keyboard)
-
-
-async def cb_register(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    name = query.data.split(":", 1)[1]
+    name = STAFF_IDS.get(user_id)
+    if not name:
+        await update.message.reply_text(msg.NOT_ON_ROSTER)
+        return
     await db.upsert_staff(
-        chat_id=query.from_user.id,
-        username=query.from_user.username,
+        chat_id=user_id,
+        username=update.effective_user.username,
         display_name=name,
     )
-    await query.edit_message_text(msg.REGISTERED.format(name=name))
+    await update.message.reply_text(msg.REGISTERED.format(name=name))
 
 
 async def cmd_upcoming(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -80,19 +61,19 @@ async def cmd_upcoming(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 d = date.fromisoformat(e["event_date"])
                 lines.append(
                     msg.UPCOMING_LECTURE.format(
-                        title=e["title"],
-                        cohort=e["cohort"],
+                        title=_e(e["title"]),
+                        cohort=_e(e["cohort"]),
                         weekday=d.strftime("%A"),
                         date=d.strftime("%B %-d"),
-                        time=e["event_time"],
+                        time=e["event_time"] or "TBD",
                     )
                 )
             elif e.get("event_date"):
                 d = date.fromisoformat(e["event_date"])
                 lines.append(
                     msg.UPCOMING_CONSULT_DATE.format(
-                        title=e["title"],
-                        cohort=e["cohort"],
+                        title=_e(e["title"]),
+                        cohort=_e(e["cohort"]),
                         weekday=d.strftime("%A"),
                         date=d.strftime("%B %-d"),
                         duration=e.get("duration_min") or "?",
@@ -102,8 +83,8 @@ async def cmd_upcoming(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 d = date.fromisoformat(e["week_start"])
                 lines.append(
                     msg.UPCOMING_CONSULT_WEEK.format(
-                        title=e["title"],
-                        cohort=e["cohort"],
+                        title=_e(e["title"]),
+                        cohort=_e(e["cohort"]),
                         date=d.strftime("%B %-d"),
                         duration=e.get("duration_min") or "?",
                     )
@@ -111,7 +92,7 @@ async def cmd_upcoming(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         except (ValueError, KeyError) as exc:
             logger.warning("Could not format event %s: %s", e.get("id"), exc)
 
-    await update.message.reply_text("".join(lines), parse_mode="Markdown")
+    await update.message.reply_text("".join(lines), parse_mode="HTML")
 
 
 async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -176,7 +157,6 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("cancel", cmd_cancel))
     app.add_handler(CommandHandler("reload", cmd_reload))
     app.add_handler(CommandHandler("sync_status", cmd_sync_status))
-    app.add_handler(CallbackQueryHandler(cb_register, pattern=r"^register:"))
     app.add_error_handler(_handle_error)
 
     return app

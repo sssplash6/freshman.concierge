@@ -80,7 +80,6 @@ def test_format_reminder_consult_date():
     }
     msg = format_reminder_message(event)
     assert "today" in msg
-    assert "EC Development" in msg
     assert "45 min" in msg
 
 

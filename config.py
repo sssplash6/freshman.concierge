@@ -21,7 +21,16 @@ DB_PATH: str = os.getenv("DB_PATH", "/tmp/concierge_bot.db")
 SYNC_INTERVAL_HOURS: int = int(os.getenv("SYNC_INTERVAL_HOURS", "6"))
 TIMEZONE: str = "Asia/Tashkent"  # GMT+5
 
-KNOWN_NAMES: list[str] = [
-    "Tyler", "Valera", "Rustam", "Nigel", "Sega",
-    "Sanjar", "Lyusyena", "Alisher", "Madina", "Komron",
-]
+STAFF_IDS: dict[int, str] = {
+    8384175592: "Sanjar",
+    7926199790: "Valera",
+    744979646:  "Sega",
+    7185151344: "Rustam",
+    907955385:  "Nigel",
+    1378248439: "Lyusyena",
+    8115552659: "Tyler",
+    433396623:  "Alisher",
+    791356497:  "Gulrukh",
+}
+
+STAFF_ID_BY_NAME: dict[str, int] = {name: uid for uid, name in STAFF_IDS.items()}

@@ -1,16 +1,8 @@
 # messages.py
 
-WELCOME = (
-    "👋 Welcome to the AP Concierge Bot.\n\n"
-    "Please select your name to register and start receiving reminders:"
-)
-
-ALREADY_REGISTERED = (
-    "You're currently registered as *{name}*.\n"
-    "Tap your name below to confirm, or choose a different one:"
-)
-
 REGISTERED = "✅ You're registered as {name}. You'll receive reminders before your sessions."
+
+NOT_ON_ROSTER = "You're not on the AP team roster. Contact the admin if this is a mistake."
 
 UNREGISTERED = (
     "✅ You've been unregistered. You will no longer receive reminders.\n"
@@ -23,50 +15,50 @@ NOT_REGISTERED = (
 
 ADMIN_ONLY = "This command is for admins only."
 
-UPCOMING_HEADER = "📅 Your next {count} session(s):\n\n"
+UPCOMING_HEADER = "📅 <b>Your next {count} session(s)</b>\n\n"
 UPCOMING_NONE = "No upcoming sessions found for your name."
 
 UPCOMING_LECTURE = (
-    "🎓 *{title}*\n"
-    "👥 Cohort: {cohort}\n"
-    "📅 {weekday}, {date} · {time} (GMT+5)\n"
+    "🎓 <b>{title}</b>\n"
+    "<blockquote>👥 {cohort}\n"
+    "📅 {weekday}, {date} · {time} GMT+5</blockquote>\n\n"
 )
 
 UPCOMING_CONSULT_DATE = (
-    "📋 *{title}*\n"
-    "👥 Cohort: {cohort}\n"
-    "📅 {weekday}, {date}\n"
-    "⏱ {duration} min\n"
+    "📋 <b>{title}</b>\n"
+    "<blockquote>👥 {cohort}\n"
+    "📅 {weekday}, {date} · {duration} min</blockquote>\n\n"
 )
 
 UPCOMING_CONSULT_WEEK = (
-    "📋 *{title}*\n"
-    "👥 Cohort: {cohort}\n"
-    "📅 Week of {date}\n"
-    "⏱ {duration} min\n"
+    "📋 <b>{title}</b>\n"
+    "<blockquote>👥 {cohort}\n"
+    "📅 Week of {date} · {duration} min</blockquote>\n\n"
 )
 
 REMINDER_LECTURE = (
-    "🎓 Reminder: Your lecture starts in 1 hour\n\n"
-    "📚 {title}\n"
-    "👥 Cohort: {cohort}\n"
-    "📅 {weekday}, {date} · {time} (GMT+5)"
+    "🔔 <b>Lecture in 1 hour</b>\n"
+    "<blockquote>📚 {title}\n"
+    "👥 {cohort}\n"
+    "📅 {weekday}, {date} · {time} GMT+5</blockquote>"
 )
 
 REMINDER_CONSULT_DATE = (
-    "📋 Reminder: Consultation scheduled today\n\n"
-    "🗓 {title}\n"
-    "👥 Cohort: {cohort}\n"
-    "📅 {weekday}, {date}\n"
-    "⏱ {duration} min"
+    "🔔 <b>Consultation today</b>\n"
+    "<blockquote>👥 {cohort}\n"
+    "📅 {weekday}, {date} · {duration} min</blockquote>"
 )
 
 REMINDER_CONSULT_WEEK = (
-    "📋 Reminder: Consultation scheduled this week\n\n"
-    "🗓 {title}\n"
-    "👥 Cohort: {cohort}\n"
-    "📅 Week of {date}\n"
-    "⏱ {duration} min"
+    "🔔 <b>Consultation this week</b>\n"
+    "<blockquote>👥 {cohort}\n"
+    "📅 Week of {date} · {duration} min</blockquote>"
+)
+
+REMINDER_SEMINAR = (
+    "🔔 <b>Seminar in 1 hour</b>\n"
+    "<blockquote>👥 {cohort}\n"
+    "📅 {weekday} · {time} GMT+5</blockquote>"
 )
 
 RELOAD_STARTED = "🔄 Syncing schedule from Google Sheets..."
