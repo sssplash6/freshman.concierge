@@ -6,16 +6,21 @@ from datetime import date
 
 _e = html.escape
 
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     Application,
+    CallbackQueryHandler,
     CommandHandler,
+    ConversationHandler,
     ContextTypes,
 )
 
 import database as db
 import messages as msg
-from config import ADMIN_CHAT_ID, STAFF_IDS, TELEGRAM_BOT_TOKEN
+from config import ADMIN_CHAT_ID, REMIND_IDS, STAFF_IDS, TELEGRAM_BOT_TOKEN
+from scheduler import format_reminder_message
+
+SELECT_PERSON, SELECT_EVENT = range(2)
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +112,114 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     await update.message.reply_text(msg.UNREGISTERED)
 
 
+def _event_button_label(event: dict) -> str:
+    label = event["title"]
+    if event.get("event_date"):
+        d = date.fromisoformat(event["event_date"])
+        label += f" · {d.strftime('%b %-d')}"
+    elif event.get("week_start"):
+        d = date.fromisoformat(event["week_start"])
+        label += f" · week of {d.strftime('%b %-d')}"
+    return label[:60]
+
+
+async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if not update.effective_user or not update.message:
+        return ConversationHandler.END
+    if update.effective_user.id not in REMIND_IDS:
+        await update.message.reply_text(msg.ADMIN_ONLY)
+        return ConversationHandler.END
+
+    staff_list = await db.get_all_staff()
+    if not staff_list:
+        await update.message.reply_text("No registered staff found.")
+        return ConversationHandler.END
+
+    seen: set[str] = set()
+    keyboard: list[list[InlineKeyboardButton]] = []
+    for s in staff_list:
+        if s["display_name"] not in seen:
+            seen.add(s["display_name"])
+            keyboard.append([InlineKeyboardButton(s["display_name"], callback_data=f"rp:{s['display_name']}")])
+    keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="rc")])
+
+    await update.message.reply_text(
+        "👤 Choose a staff member to remind:",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
+    return SELECT_PERSON
+
+
+async def cb_remind_person(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if not query:
+        return ConversationHandler.END
+    await query.answer()
+
+    name = query.data[3:]
+    context.user_data["remind_name"] = name
+
+    events = await db.get_upcoming_events_for_staff(name, limit=10)
+    if not events:
+        await query.edit_message_text(f"No upcoming events found for {_e(name)}.")
+        return ConversationHandler.END
+
+    keyboard = [
+        [InlineKeyboardButton(_event_button_label(e), callback_data=f"re:{e['id']}")]
+        for e in events
+    ]
+    keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="rc")])
+
+    await query.edit_message_text(
+        f"📅 Choose an event to remind <b>{_e(name)}</b> of:",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode="HTML",
+    )
+    return SELECT_EVENT
+
+
+async def cb_remind_event(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if not query:
+        return ConversationHandler.END
+    await query.answer()
+
+    event_id = int(query.data[3:])
+    name = context.user_data.get("remind_name", "")
+
+    all_events = await db.get_all_events()
+    event = next((e for e in all_events if e["id"] == event_id), None)
+    if not event:
+        await query.edit_message_text("Event not found.")
+        return ConversationHandler.END
+
+    targets = [s for s in await db.get_all_staff() if s["display_name"] == name]
+    if not targets:
+        await query.edit_message_text(f"{_e(name)} is not registered.")
+        return ConversationHandler.END
+
+    text = format_reminder_message(event)
+    sent = 0
+    for s in targets:
+        try:
+            await context.bot.send_message(chat_id=s["chat_id"], text=text, parse_mode="HTML")
+            sent += 1
+        except Exception:
+            logger.warning("Failed to send reminder to chat %d", s["chat_id"])
+
+    device_word = "device" if sent == 1 else "devices"
+    await query.edit_message_text(f"✅ Reminder sent to {_e(name)} ({sent} {device_word}).")
+    return ConversationHandler.END
+
+
+async def cb_remind_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if query:
+        await query.answer()
+        await query.edit_message_text("Cancelled.")
+    return ConversationHandler.END
+
+
 async def cmd_reload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message:
         return
@@ -152,6 +265,17 @@ async def cmd_sync_status(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 def build_app() -> Application:
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
+    remind_conv = ConversationHandler(
+        entry_points=[CommandHandler("remind", cmd_remind)],
+        states={
+            SELECT_PERSON: [CallbackQueryHandler(cb_remind_person, pattern=r"^rp:")],
+            SELECT_EVENT:  [CallbackQueryHandler(cb_remind_event,  pattern=r"^re:")],
+        },
+        fallbacks=[CallbackQueryHandler(cb_remind_cancel, pattern=r"^rc$")],
+        per_message=False,
+    )
+
+    app.add_handler(remind_conv)
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("upcoming", cmd_upcoming))
     app.add_handler(CommandHandler("cancel", cmd_cancel))
