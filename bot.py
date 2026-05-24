@@ -215,6 +215,33 @@ async def cb_remind_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     return ConversationHandler.END
 
 
+async def cb_reload_notify(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+
+    if query.data == "rn:no":
+        await query.edit_message_reply_markup(reply_markup=None)
+        await query.message.reply_text(msg.RELOAD_NOTIFY_SKIPPED)
+        return
+
+    staff_list = await db.get_all_staff()
+    sent = 0
+    for s in staff_list:
+        try:
+            await context.bot.send_message(
+                chat_id=s["chat_id"],
+                text=msg.SCHEDULE_UPDATED,
+            )
+            sent += 1
+        except Exception:
+            logger.warning("Failed to notify chat %d", s["chat_id"])
+
+    await query.edit_message_reply_markup(reply_markup=None)
+    await query.message.reply_text(msg.RELOAD_NOTIFY_SENT.format(count=sent))
+
+
 async def cmd_reload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message:
         return
@@ -232,7 +259,14 @@ async def cmd_reload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             return
         await db.replace_events(events)
         await db.log_sync(len(events))
-        await update.message.reply_text(msg.RELOAD_DONE.format(count=len(events)))
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ Yes", callback_data="rn:yes"),
+            InlineKeyboardButton("❌ No",  callback_data="rn:no"),
+        ]])
+        await update.message.reply_text(
+            msg.RELOAD_DONE.format(count=len(events)),
+            reply_markup=keyboard,
+        )
     except Exception:
         logger.exception("Reload failed")
         await update.message.reply_text(msg.RELOAD_FAILED)
@@ -271,6 +305,7 @@ def build_app() -> Application:
     )
 
     app.add_handler(remind_conv)
+    app.add_handler(CallbackQueryHandler(cb_reload_notify, pattern=r"^rn:"))
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("upcoming", cmd_upcoming))
     app.add_handler(CommandHandler("cancel", cmd_cancel))

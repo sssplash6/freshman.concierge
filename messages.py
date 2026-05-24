@@ -62,9 +62,12 @@ REMINDER_SEMINAR = (
 )
 
 RELOAD_STARTED = "🔄 Syncing schedule from Google Sheets..."
-RELOAD_DONE = "✅ Sync complete. {count} events loaded."
+RELOAD_DONE = "✅ Sync complete. {count} events loaded.\n\nDo you want to notify staff of the changes?"
 RELOAD_EMPTY = "No events returned from sheet — existing schedule retained."
 RELOAD_FAILED = "❌ Sync failed. Check server logs for details."
+RELOAD_NOTIFY_SENT = "📣 Notified {count} staff member(s)."
+RELOAD_NOTIFY_SKIPPED = "OK, no notification sent."
+SCHEDULE_UPDATED = "📅 The schedule has been updated. Use /upcoming to see your latest sessions."
 
 SYNC_STATUS_NONE = "No sync has been run yet."
 SYNC_STATUS = (
