@@ -6,13 +6,21 @@ from datetime import date
 
 _e = html.escape
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, Update
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
     CommandHandler,
     ConversationHandler,
     ContextTypes,
+    MessageHandler,
+    filters,
+)
+
+MAIN_KEYBOARD = ReplyKeyboardMarkup(
+    [[KeyboardButton("📅 My Schedule")]],
+    resize_keyboard=True,
+    is_persistent=True,
 )
 
 import database as db
@@ -42,7 +50,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         username=update.effective_user.username,
         display_name=name,
     )
-    await update.message.reply_text(msg.REGISTERED.format(name=name))
+    await update.message.reply_text(msg.REGISTERED.format(name=name), reply_markup=MAIN_KEYBOARD)
 
 
 async def cmd_upcoming(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -308,6 +316,7 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_reload_notify, pattern=r"^rn:"))
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("upcoming", cmd_upcoming))
+    app.add_handler(MessageHandler(filters.Text(["📅 My Schedule"]), cmd_upcoming))
     app.add_handler(CommandHandler("cancel", cmd_cancel))
     app.add_handler(CommandHandler("reload", cmd_reload))
     app.add_handler(CommandHandler("sync_status", cmd_sync_status))
