@@ -167,15 +167,19 @@ async def cb_remind_person(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await query.edit_message_text(f"No upcoming events found for {_e(name)}.")
         return ConversationHandler.END
 
-    keyboard = [
-        [InlineKeyboardButton(_event_button_label(e), callback_data=f"re:{e['id']}")]
-        for e in events
-    ]
-    keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="rc")])
+    context.user_data["remind_events"] = events
+
+    lines = [f"📅 Choose an event to remind <b>{_e(name)}</b> of:\n"]
+    for i, e in enumerate(events, 1):
+        lines.append(f"{i}. {_event_button_label(e)}")
+
+    number_buttons = [InlineKeyboardButton(str(i), callback_data=f"re:{i}") for i in range(1, len(events) + 1)]
+    rows = [number_buttons[i:i+5] for i in range(0, len(number_buttons), 5)]
+    rows.append([InlineKeyboardButton("❌ Cancel", callback_data="rc")])
 
     await query.edit_message_text(
-        f"📅 Choose an event to remind <b>{_e(name)}</b> of:",
-        reply_markup=InlineKeyboardMarkup(keyboard),
+        "\n".join(lines),
+        reply_markup=InlineKeyboardMarkup(rows),
         parse_mode="HTML",
     )
     return SELECT_EVENT
@@ -187,11 +191,11 @@ async def cb_remind_event(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return ConversationHandler.END
     await query.answer()
 
-    event_id = int(query.data[3:])
+    idx = int(query.data[3:]) - 1
     name = context.user_data.get("remind_name", "")
+    events = context.user_data.get("remind_events", [])
 
-    all_events = await db.get_all_events()
-    event = next((e for e in all_events if e["id"] == event_id), None)
+    event = events[idx] if 0 <= idx < len(events) else None
     if not event:
         await query.edit_message_text("Event not found.")
         return ConversationHandler.END
