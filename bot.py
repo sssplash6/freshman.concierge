@@ -130,17 +130,11 @@ async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         await update.message.reply_text(msg.ADMIN_ONLY)
         return ConversationHandler.END
 
-    staff_list = await db.get_all_staff()
-    if not staff_list:
-        await update.message.reply_text("No registered staff found.")
-        return ConversationHandler.END
-
-    seen: set[str] = set()
-    keyboard: list[list[InlineKeyboardButton]] = []
-    for s in staff_list:
-        if s["display_name"] not in seen:
-            seen.add(s["display_name"])
-            keyboard.append([InlineKeyboardButton(s["display_name"], callback_data=f"rp:{s['display_name']}")])
+    names = sorted(set(STAFF_IDS.values()))
+    keyboard: list[list[InlineKeyboardButton]] = [
+        [InlineKeyboardButton(name, callback_data=f"rp:{name}")]
+        for name in names
+    ]
     keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="rc")])
 
     await update.message.reply_text(
@@ -195,7 +189,7 @@ async def cb_remind_event(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     targets = [s for s in await db.get_all_staff() if s["display_name"] == name]
     if not targets:
-        await query.edit_message_text(f"{_e(name)} is not registered.")
+        await query.edit_message_text(f"⚠️ {_e(name)} hasn't started the bot yet — no chat to send to.")
         return ConversationHandler.END
 
     text = format_reminder_message(event)
