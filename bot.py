@@ -223,6 +223,11 @@ async def cb_remind_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     return ConversationHandler.END
 
 
+async def handle_fallback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.message:
+        await update.message.reply_text(msg.FALLBACK)
+
+
 async def cb_reload_notify(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if not query:
@@ -320,6 +325,7 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("cancel", cmd_cancel))
     app.add_handler(CommandHandler("reload", cmd_reload))
     app.add_handler(CommandHandler("sync_status", cmd_sync_status))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_fallback))
     app.add_error_handler(_handle_error)
 
     return app
