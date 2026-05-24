@@ -113,14 +113,15 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 
 def _event_button_label(event: dict) -> str:
-    label = event["title"]
+    icon = "🎓" if event["type"] == "lecture" else "📋"
+    cohort = event.get("cohort", "")
     if event.get("event_date"):
         d = date.fromisoformat(event["event_date"])
-        label += f" · {d.strftime('%b %-d')}"
+        return f"{icon} {d.strftime('%b %-d')} · {cohort}"
     elif event.get("week_start"):
         d = date.fromisoformat(event["week_start"])
-        label += f" · week of {d.strftime('%b %-d')}"
-    return label[:60]
+        return f"{icon} Wk {d.strftime('%b %-d')} · {cohort}"
+    return f"{icon} {cohort}"
 
 
 async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
