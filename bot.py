@@ -218,7 +218,7 @@ async def cb_remind_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 async def cmd_reload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message:
         return
-    if update.effective_chat.id != ADMIN_CHAT_ID:
+    if update.effective_chat.id != ADMIN_CHAT_ID and update.effective_chat.id not in REMIND_IDS:
         await update.message.reply_text(msg.ADMIN_ONLY)
         return
 
