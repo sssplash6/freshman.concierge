@@ -88,8 +88,37 @@ async def get_all_staff() -> list[dict]:
         return [dict(r) for r in rows]
 
 
-async def replace_events(events: list[dict]) -> None:
+async def replace_events(events: list[dict]) -> set[str]:
+    def _fp(e: dict) -> tuple:
+        return (
+            e.get("cohort") or "",
+            e.get("type") or "",
+            e.get("title") or "",
+            e.get("event_date") or "",
+            e.get("week_start") or "",
+            e.get("event_time") or "",
+            e.get("duration_min") or 0,
+        )
+
     async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT staff_name, cohort, type, title, event_date, week_start, event_time, duration_min FROM events"
+        )
+        old_by_name: dict[str, set] = {}
+        for row in await cursor.fetchall():
+            r = dict(row)
+            old_by_name.setdefault(r["staff_name"], set()).add(_fp(r))
+
+        new_by_name: dict[str, set] = {}
+        for e in events:
+            new_by_name.setdefault(e["staff_name"], set()).add(_fp(e))
+
+        affected = {
+            n for n in set(old_by_name) | set(new_by_name)
+            if old_by_name.get(n) != new_by_name.get(n)
+        }
+
         await db.execute("BEGIN")
         await db.execute("DELETE FROM events")
         await db.executemany(
@@ -104,6 +133,8 @@ async def replace_events(events: list[dict]) -> None:
             events,
         )
         await db.commit()
+
+    return affected
 
 
 async def get_events_for_staff(display_name: str) -> list[dict]:

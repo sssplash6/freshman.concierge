@@ -270,6 +270,43 @@ async def cb_reload_notify(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await query.message.reply_text(msg.RELOAD_NOTIFY_SENT.format(count=sent))
 
 
+async def cb_reload_affected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+
+    name = query.data[3:]
+    targets = [s for s in await db.get_all_staff() if s["display_name"] == name]
+    if not targets:
+        await query.message.reply_text(f"⚠️ {_e(name)} hasn't started the bot yet — no chat to send to.")
+    else:
+        sent = 0
+        for s in targets:
+            try:
+                await context.bot.send_message(chat_id=s["chat_id"], text=msg.SCHEDULE_UPDATED)
+                sent += 1
+            except Exception:
+                logger.warning("Failed to notify chat %d", s["chat_id"])
+        device_word = "device" if sent == 1 else "devices"
+        await query.message.reply_text(f"✅ Notified {_e(name)} ({sent} {device_word}).")
+
+    remaining = [n for n in context.user_data.get("reload_affected", []) if n != name]
+    context.user_data["reload_affected"] = remaining
+    if remaining:
+        rows = [
+            [InlineKeyboardButton(n, callback_data=f"ra:{n}") for n in remaining[i:i + 2]]
+            for i in range(0, len(remaining), 2)
+        ]
+        rows.append([
+            InlineKeyboardButton("📣 Notify All", callback_data="rn:yes"),
+            InlineKeyboardButton("❌ Skip",        callback_data="rn:no"),
+        ])
+        await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(rows))
+    else:
+        await query.edit_message_reply_markup(reply_markup=None)
+
+
 async def cmd_reload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message:
         return
@@ -285,15 +322,26 @@ async def cmd_reload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         if not events:
             await update.message.reply_text(msg.RELOAD_EMPTY)
             return
-        await db.replace_events(events)
+        affected = await db.replace_events(events)
         await db.log_sync(len(events))
-        keyboard = InlineKeyboardMarkup([[
-            InlineKeyboardButton("✅ Yes", callback_data="rn:yes"),
-            InlineKeyboardButton("❌ No",  callback_data="rn:no"),
-        ]])
+
+        if not affected:
+            await update.message.reply_text(msg.RELOAD_DONE_NO_CHANGES.format(count=len(events)))
+            return
+
+        sorted_affected = sorted(affected)
+        context.user_data["reload_affected"] = sorted_affected
+        rows = [
+            [InlineKeyboardButton(n, callback_data=f"ra:{n}") for n in sorted_affected[i:i + 2]]
+            for i in range(0, len(sorted_affected), 2)
+        ]
+        rows.append([
+            InlineKeyboardButton("📣 Notify All", callback_data="rn:yes"),
+            InlineKeyboardButton("❌ Skip",        callback_data="rn:no"),
+        ])
         await update.message.reply_text(
-            msg.RELOAD_DONE.format(count=len(events)),
-            reply_markup=keyboard,
+            msg.RELOAD_DONE_CHANGED.format(count=len(events), changed=len(affected)),
+            reply_markup=InlineKeyboardMarkup(rows),
         )
     except Exception:
         logger.exception("Reload failed")
@@ -336,6 +384,7 @@ def build_app() -> Application:
     )
 
     app.add_handler(remind_conv)
+    app.add_handler(CallbackQueryHandler(cb_reload_affected, pattern=r"^ra:"))
     app.add_handler(CallbackQueryHandler(cb_reload_notify, pattern=r"^rn:"))
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("upcoming", cmd_upcoming))
