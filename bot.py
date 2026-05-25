@@ -23,6 +23,15 @@ MAIN_KEYBOARD = ReplyKeyboardMarkup(
     is_persistent=True,
 )
 
+ADMIN_KEYBOARD = ReplyKeyboardMarkup(
+    [
+        [KeyboardButton("📅 My Schedule"), KeyboardButton("🔄 Reload")],
+        [KeyboardButton("📊 Sync Status"), KeyboardButton("📣 Remind")],
+    ],
+    resize_keyboard=True,
+    is_persistent=True,
+)
+
 import database as db
 import messages as msg
 from config import ADMIN_CHAT_ID, REMIND_IDS, STAFF_IDS, TELEGRAM_BOT_TOKEN
@@ -50,7 +59,9 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         username=update.effective_user.username,
         display_name=name,
     )
-    await update.message.reply_text(msg.REGISTERED.format(name=name), reply_markup=MAIN_KEYBOARD)
+    is_admin = user_id in REMIND_IDS or user_id == ADMIN_CHAT_ID
+    keyboard = ADMIN_KEYBOARD if is_admin else MAIN_KEYBOARD
+    await update.message.reply_text(msg.REGISTERED.format(name=name), reply_markup=keyboard)
 
 
 async def cmd_upcoming(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -312,7 +323,10 @@ def build_app() -> Application:
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
     remind_conv = ConversationHandler(
-        entry_points=[CommandHandler("remind", cmd_remind)],
+        entry_points=[
+            CommandHandler("remind", cmd_remind),
+            MessageHandler(filters.Text(["📣 Remind"]), cmd_remind),
+        ],
         states={
             SELECT_PERSON: [CallbackQueryHandler(cb_remind_person, pattern=r"^rp:")],
             SELECT_EVENT:  [CallbackQueryHandler(cb_remind_event,  pattern=r"^re:")],
@@ -328,7 +342,9 @@ def build_app() -> Application:
     app.add_handler(MessageHandler(filters.Text(["📅 My Schedule"]), cmd_upcoming))
     app.add_handler(CommandHandler("cancel", cmd_cancel))
     app.add_handler(CommandHandler("reload", cmd_reload))
+    app.add_handler(MessageHandler(filters.Text(["🔄 Reload"]), cmd_reload))
     app.add_handler(CommandHandler("sync_status", cmd_sync_status))
+    app.add_handler(MessageHandler(filters.Text(["📊 Sync Status"]), cmd_sync_status))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_fallback))
     app.add_error_handler(_handle_error)
 
