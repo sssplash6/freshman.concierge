@@ -46,6 +46,24 @@ async def init_db() -> None:
                 event_count INTEGER NOT NULL
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS weekly_completions (
+                chat_id    INTEGER NOT NULL,
+                week_start TEXT NOT NULL,
+                title      TEXT NOT NULL,
+                cohort     TEXT NOT NULL,
+                PRIMARY KEY (chat_id, week_start, title, cohort)
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS weekly_reminders_sent (
+                chat_id       INTEGER NOT NULL,
+                reminded_date TEXT NOT NULL,
+                title         TEXT NOT NULL,
+                cohort        TEXT NOT NULL,
+                PRIMARY KEY (chat_id, reminded_date, title, cohort)
+            )
+        """)
         await db.commit()
 
 
@@ -203,6 +221,50 @@ async def log_sync(event_count: int) -> None:
         await db.execute(
             "INSERT INTO sync_log (synced_at, event_count) VALUES (?, ?)",
             (datetime.now(timezone.utc).isoformat(), event_count),
+        )
+        await db.commit()
+
+
+async def get_event_by_id(event_id: int) -> dict | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT * FROM events WHERE id = ?", (event_id,))
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+
+async def is_weekly_complete(chat_id: int, week_start: str, title: str, cohort: str) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT 1 FROM weekly_completions WHERE chat_id=? AND week_start=? AND title=? AND cohort=?",
+            (chat_id, week_start, title, cohort),
+        )
+        return await cursor.fetchone() is not None
+
+
+async def mark_weekly_complete(chat_id: int, week_start: str, title: str, cohort: str) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT OR IGNORE INTO weekly_completions (chat_id, week_start, title, cohort) VALUES (?,?,?,?)",
+            (chat_id, week_start, title, cohort),
+        )
+        await db.commit()
+
+
+async def weekly_reminder_sent_today(chat_id: int, reminded_date: str, title: str, cohort: str) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT 1 FROM weekly_reminders_sent WHERE chat_id=? AND reminded_date=? AND title=? AND cohort=?",
+            (chat_id, reminded_date, title, cohort),
+        )
+        return await cursor.fetchone() is not None
+
+
+async def log_weekly_reminder(chat_id: int, reminded_date: str, title: str, cohort: str) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT OR IGNORE INTO weekly_reminders_sent (chat_id, reminded_date, title, cohort) VALUES (?,?,?,?)",
+            (chat_id, reminded_date, title, cohort),
         )
         await db.commit()
 

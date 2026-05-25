@@ -3,6 +3,7 @@ import html
 import logging
 import os
 from datetime import datetime, timedelta, date
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 _e = html.escape
 
@@ -83,6 +84,55 @@ def format_reminder_message(event: dict) -> str:
     raise ValueError(f"Unknown event type: {event['type']!r}")
 
 
+def format_weekly_task_reminder(event: dict) -> str:
+    d = date.fromisoformat(event["week_start"])
+    return msg.WEEKLY_TASK_REMINDER.format(
+        cohort=_e(event["cohort"]),
+        title=_e(event["title"]),
+        date=d.strftime("%B %-d"),
+    )
+
+
+async def send_weekly_task_reminders(bot: Bot) -> None:
+    today = datetime.now(TZ).date()
+    week_start = today - timedelta(days=today.weekday())  # Monday of current week
+    week_start_str = week_start.isoformat()
+    today_str = today.isoformat()
+
+    events = await db.get_all_events()
+    staff_list = await db.get_all_staff()
+
+    for event in events:
+        if not event.get("week_start") or event.get("event_date"):
+            continue
+        if event["week_start"] != week_start_str:
+            continue
+
+        for staff in staff_list:
+            if staff["display_name"] != event["staff_name"]:
+                continue
+            if await db.is_weekly_complete(staff["chat_id"], week_start_str, event["title"], event["cohort"]):
+                continue
+            if await db.weekly_reminder_sent_today(staff["chat_id"], today_str, event["title"], event["cohort"]):
+                continue
+
+            text = format_weekly_task_reminder(event)
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("✅ Done", callback_data=f"wc:{event['id']}")
+            ]])
+            try:
+                await bot.send_message(
+                    chat_id=staff["chat_id"],
+                    text=text,
+                    parse_mode="HTML",
+                    reply_markup=keyboard,
+                )
+                await db.log_weekly_reminder(staff["chat_id"], today_str, event["title"], event["cohort"])
+                logger.info("Sent weekly task reminder for event %d to chat %d", event["id"], staff["chat_id"])
+            except TelegramError as e:
+                logger.error("Failed to send weekly reminder to %d: %s", staff["chat_id"], e)
+
+
 async def send_seminar_reminder(
     bot: Bot, chat_id: int, cohort: str, weekday: str, time: str
 ) -> None:
@@ -114,6 +164,10 @@ async def check_and_send_reminders(bot: Bot) -> None:
         except Exception:
             logger.exception("Failed to format reminder for event %d", event["id"])
             continue
+        # Weekly tasks (week_start + no event_date) are handled by send_weekly_task_reminders
+        if event.get("week_start") and not event.get("event_date"):
+            continue
+
         for staff in staff_list:
             if staff["display_name"] != event["staff_name"]:
                 continue
@@ -181,6 +235,16 @@ async def init_scheduler(bot: Bot) -> None:
         hours=SYNC_INTERVAL_HOURS,
         kwargs={"bot": bot},
         id="sheet_sync",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        send_weekly_task_reminders,
+        trigger="cron",
+        hour=10,
+        minute=0,
+        timezone=TZ,
+        kwargs={"bot": bot},
+        id="weekly_task_reminders",
         replace_existing=True,
     )
     if not scheduler.running:

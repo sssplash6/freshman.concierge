@@ -270,6 +270,26 @@ async def cb_reload_notify(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await query.message.reply_text(msg.RELOAD_NOTIFY_SENT.format(count=sent))
 
 
+async def cb_weekly_complete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer("✅ Marked as complete!")
+
+    event_id = int(query.data[3:])
+    event = await db.get_event_by_id(event_id)
+    if not event:
+        return
+
+    await db.mark_weekly_complete(
+        query.from_user.id,
+        event["week_start"],
+        event["title"],
+        event["cohort"],
+    )
+    await query.edit_message_reply_markup(reply_markup=None)
+
+
 async def cb_reload_affected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if not query:
@@ -384,6 +404,7 @@ def build_app() -> Application:
     )
 
     app.add_handler(remind_conv)
+    app.add_handler(CallbackQueryHandler(cb_weekly_complete, pattern=r"^wc:"))
     app.add_handler(CallbackQueryHandler(cb_reload_affected, pattern=r"^ra:"))
     app.add_handler(CallbackQueryHandler(cb_reload_notify, pattern=r"^rn:"))
     app.add_handler(CommandHandler("start", cmd_start))

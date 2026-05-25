@@ -70,6 +70,13 @@ RELOAD_NOTIFY_SENT = "📣 Notified {count} staff member(s)."
 RELOAD_NOTIFY_SKIPPED = "OK, no notification sent."
 SCHEDULE_UPDATED = "📅 The schedule has been updated. Use /upcoming to see your latest sessions."
 
+WEEKLY_TASK_REMINDER = (
+    "📋 <b>Weekly task</b>\n"
+    "<blockquote>👥 {cohort}\n"
+    "📝 {title}\n"
+    "📅 Week of {date}</blockquote>"
+)
+
 FALLBACK = "Tap 📅 My Schedule to see your upcoming sessions, or send /start to register."
 
 SYNC_STATUS_NONE = "No sync has been run yet."
