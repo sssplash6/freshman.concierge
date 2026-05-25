@@ -18,15 +18,18 @@ from telegram.ext import (
 )
 
 MAIN_KEYBOARD = ReplyKeyboardMarkup(
-    [[KeyboardButton("📅 My Schedule")]],
+    [
+        [KeyboardButton("📅 My Schedule"), KeyboardButton("🔗 Set Link")],
+    ],
     resize_keyboard=True,
     is_persistent=True,
 )
 
 ADMIN_KEYBOARD = ReplyKeyboardMarkup(
     [
-        [KeyboardButton("📅 My Schedule"), KeyboardButton("🔄 Reload")],
-        [KeyboardButton("📊 Sync Status"), KeyboardButton("📣 Remind")],
+        [KeyboardButton("📅 My Schedule"), KeyboardButton("🔗 Set Link")],
+        [KeyboardButton("🔄 Reload"),      KeyboardButton("📊 Sync Status")],
+        [KeyboardButton("📣 Remind")],
     ],
     resize_keyboard=True,
     is_persistent=True,
@@ -40,7 +43,9 @@ from scheduler import format_reminder_message
 from sheets_parser import append_completion_row
 
 SELECT_PERSON, SELECT_EVENT = range(2)
-AWAITING_REASON = 0  # state for completion_conv
+AWAITING_REASON = 0   # state for completion_conv
+SETLINK_COHORT = 0    # states for setlink_conv
+SETLINK_URL    = 1
 
 logger = logging.getLogger(__name__)
 
@@ -238,6 +243,68 @@ async def cb_remind_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if query:
         await query.answer()
         await query.edit_message_text("Cancelled.")
+    return ConversationHandler.END
+
+
+async def cmd_setlink(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if not update.effective_user or not update.message:
+        return ConversationHandler.END
+    staff = await db.get_staff(update.effective_user.id)
+    if not staff:
+        await update.message.reply_text(msg.NOT_REGISTERED)
+        return ConversationHandler.END
+
+    cohorts = await db.get_cohorts_for_staff(staff["display_name"])
+    if not cohorts:
+        await update.message.reply_text(msg.SETLINK_NO_COHORTS)
+        return ConversationHandler.END
+
+    keyboard = [[InlineKeyboardButton(c, callback_data=f"sl:{c}")] for c in cohorts]
+    keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="sl:cancel")])
+    await update.message.reply_text(
+        msg.SETLINK_CHOOSE_COHORT,
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
+    return SETLINK_COHORT
+
+
+async def cb_setlink_cohort(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if not query:
+        return ConversationHandler.END
+    await query.answer()
+
+    if query.data == "sl:cancel":
+        await query.edit_message_text("Cancelled.")
+        return ConversationHandler.END
+
+    cohort = query.data[3:]
+    context.user_data["setlink_cohort"] = cohort
+    await query.edit_message_text(
+        msg.SETLINK_ENTER_LINK.format(cohort=_e(cohort)),
+        parse_mode="HTML",
+    )
+    return SETLINK_URL
+
+
+async def cb_setlink_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if not update.message or not update.effective_user:
+        return SETLINK_URL
+
+    link = update.message.text.strip()
+    cohort = context.user_data.pop("setlink_cohort", None)
+    if not cohort:
+        return ConversationHandler.END
+
+    staff = await db.get_staff(update.effective_user.id)
+    if not staff:
+        return ConversationHandler.END
+
+    await db.set_consult_link(staff["display_name"], cohort, link)
+    await update.message.reply_text(
+        msg.SETLINK_SAVED.format(cohort=_e(cohort)),
+        parse_mode="HTML",
+    )
     return ConversationHandler.END
 
 
@@ -487,6 +554,20 @@ async def cmd_sync_status(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 def build_app() -> Application:
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
+    setlink_conv = ConversationHandler(
+        entry_points=[
+            CommandHandler("setlink", cmd_setlink),
+            MessageHandler(filters.Text(["🔗 Set Link"]), cmd_setlink),
+        ],
+        states={
+            SETLINK_COHORT: [CallbackQueryHandler(cb_setlink_cohort, pattern=r"^sl:")],
+            SETLINK_URL:    [MessageHandler(filters.TEXT & ~filters.COMMAND, cb_setlink_url)],
+        },
+        fallbacks=[CallbackQueryHandler(cb_setlink_cohort, pattern=r"^sl:cancel$")],
+        per_chat=True,
+        per_message=False,
+    )
+
     completion_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(cb_completion_no, pattern=r"^cc:no:")],
         states={
@@ -510,6 +591,7 @@ def build_app() -> Application:
         per_message=False,
     )
 
+    app.add_handler(setlink_conv)
     app.add_handler(completion_conv)
     app.add_handler(remind_conv)
     app.add_handler(CallbackQueryHandler(cb_completion_yes, pattern=r"^cc:yes:"))

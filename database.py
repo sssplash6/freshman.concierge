@@ -68,6 +68,15 @@ async def init_db() -> None:
             )
         """)
         await db.execute("""
+            CREATE TABLE IF NOT EXISTS consult_links (
+                staff_name TEXT NOT NULL,
+                cohort     TEXT NOT NULL,
+                link       TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (staff_name, cohort)
+            )
+        """)
+        await db.execute("""
             CREATE TABLE IF NOT EXISTS weekly_completions (
                 chat_id    INTEGER NOT NULL,
                 week_start TEXT NOT NULL,
@@ -285,6 +294,48 @@ async def log_completion(
             (type, staff_name, chat_id, title, cohort, event_ref, int(completed), reason, answered_at),
         )
         await db.commit()
+
+
+async def set_consult_link(staff_name: str, cohort: str, link: str) -> None:
+    updated_at = datetime.now(timezone.utc).isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            INSERT INTO consult_links (staff_name, cohort, link, updated_at)
+            VALUES (?,?,?,?)
+            ON CONFLICT(staff_name, cohort) DO UPDATE SET
+                link = excluded.link,
+                updated_at = excluded.updated_at
+            """,
+            (staff_name, cohort, link, updated_at),
+        )
+        await db.commit()
+
+
+async def get_consult_link(staff_name: str, cohort: str) -> str | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT link FROM consult_links WHERE staff_name=? AND cohort=?",
+            (staff_name, cohort),
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else None
+
+
+async def get_all_consult_links() -> list[dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT * FROM consult_links")
+        return [dict(r) for r in await cursor.fetchall()]
+
+
+async def get_cohorts_for_staff(staff_name: str) -> list[str]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT DISTINCT cohort FROM events WHERE staff_name=? AND type='consult' ORDER BY cohort",
+            (staff_name,),
+        )
+        return [r[0] for r in await cursor.fetchall()]
 
 
 async def get_event_by_id(event_id: int) -> dict | None:

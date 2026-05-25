@@ -228,6 +228,41 @@ async def send_completion_checks(bot: Bot) -> None:
                 logger.error("Failed to send completion check to %d: %s", staff["chat_id"], e)
 
 
+async def send_weekly_consult_links(bot: Bot) -> None:
+    """Every Monday: post each staff member's consultation link to the relevant group chat."""
+    from config import COHORT_GROUP_CHATS
+    today = datetime.now(TZ).date()
+    week_start_str = today.isoformat()
+
+    links = await db.get_all_consult_links()
+    events = await db.get_all_events()
+
+    active_pairs: set[tuple[str, str]] = {
+        (e["staff_name"], e["cohort"])
+        for e in events
+        if e.get("week_start") == week_start_str and e.get("type") == "consult"
+    }
+
+    for entry in links:
+        pair = (entry["staff_name"], entry["cohort"])
+        if pair not in active_pairs:
+            continue
+        group_id = COHORT_GROUP_CHATS.get(entry["cohort"])
+        if not group_id:
+            logger.warning("No group chat configured for cohort %r — skipping link post", entry["cohort"])
+            continue
+        text = msg.CONSULT_LINK_POST.format(
+            staff=_e(entry["staff_name"]),
+            cohort=_e(entry["cohort"]),
+            link=entry["link"],
+        )
+        try:
+            await bot.send_message(chat_id=group_id, text=text, parse_mode="HTML")
+            logger.info("Posted consult link for %s / %s to group %d", entry["staff_name"], entry["cohort"], group_id)
+        except TelegramError as e:
+            logger.error("Failed to post consult link to group %d: %s", group_id, e)
+
+
 async def sync_schedule(bot: Bot) -> None:
     """Re-fetch Google Sheets and replace events in DB."""
     from sheets_parser import fetch_all_events
@@ -288,6 +323,17 @@ async def init_scheduler(bot: Bot) -> None:
         hours=SYNC_INTERVAL_HOURS,
         kwargs={"bot": bot},
         id="sheet_sync",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        send_weekly_consult_links,
+        trigger="cron",
+        day_of_week="mon",
+        hour=9,
+        minute=0,
+        timezone=TZ,
+        kwargs={"bot": bot},
+        id="weekly_consult_links",
         replace_existing=True,
     )
     scheduler.add_job(

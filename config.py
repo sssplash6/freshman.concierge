@@ -37,3 +37,9 @@ STAFF_IDS: dict[int, str] = {
 STAFF_ID_BY_NAME: dict[str, int] = {name: uid for uid, name in STAFF_IDS.items()}
 
 REMIND_IDS: frozenset[int] = frozenset(uid for uid, name in STAFF_IDS.items() if name == "Sega")
+
+# Maps cohort name → Telegram group chat ID. Set via COHORT_GROUP_CHATS env var as JSON.
+# Example: '{"April Offline": -1001234567890, "May Online": -1009876543210}'
+COHORT_GROUP_CHATS: dict[str, int] = {
+    k: int(v) for k, v in json.loads(os.getenv("COHORT_GROUP_CHATS", "{}")).items()
+}

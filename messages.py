@@ -88,6 +88,17 @@ COMPLETION_YES_ACK = "✅ Got it, logged as completed. Thanks!"
 COMPLETION_NO_PROMPT = "Got it. What happened? Please type a brief reason."
 COMPLETION_NO_ACK = "📝 Noted. Thanks for the update."
 
+SETLINK_CHOOSE_COHORT = "🔗 Choose a cohort to set your consultation link for:"
+SETLINK_ENTER_LINK = "Send your consultation link for <b>{cohort}</b>:"
+SETLINK_SAVED = "✅ Consultation link saved for <b>{cohort}</b>."
+SETLINK_NO_COHORTS = "No consultation events found for you in the schedule."
+CONSULT_LINK_POST = (
+    "🔗 <b>Consultation link</b>\n"
+    "<blockquote>👤 {staff}\n"
+    "👥 {cohort}\n"
+    "🌐 {link}</blockquote>"
+)
+
 FALLBACK = "Tap 📅 My Schedule to see your upcoming sessions, or send /start to register."
 
 SYNC_STATUS_NONE = "No sync has been run yet."
