@@ -35,9 +35,12 @@ ADMIN_KEYBOARD = ReplyKeyboardMarkup(
 import database as db
 import messages as msg
 from config import ADMIN_CHAT_ID, REMIND_IDS, STAFF_IDS, TELEGRAM_BOT_TOKEN
+from datetime import datetime as _dt, timezone as _tz
 from scheduler import format_reminder_message
+from sheets_parser import append_completion_row
 
 SELECT_PERSON, SELECT_EVENT = range(2)
+AWAITING_REASON = 0  # state for completion_conv
 
 logger = logging.getLogger(__name__)
 
@@ -281,13 +284,107 @@ async def cb_weekly_complete(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not event:
         return
 
-    await db.mark_weekly_complete(
-        query.from_user.id,
-        event["week_start"],
-        event["title"],
-        event["cohort"],
+    chat_id = query.from_user.id
+    await db.mark_weekly_complete(chat_id, event["week_start"], event["title"], event["cohort"])
+    await db.log_completion(
+        type="weekly_task",
+        staff_name=event["staff_name"],
+        chat_id=chat_id,
+        title=event["title"],
+        cohort=event["cohort"],
+        event_ref=event["week_start"],
+        completed=True,
     )
+    row = [
+        _dt.now(_tz.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        event["staff_name"], "Weekly Task",
+        event["title"], event["cohort"], event["week_start"], "Yes", "",
+    ]
+    asyncio.create_task(asyncio.to_thread(append_completion_row, row))
     await query.edit_message_reply_markup(reply_markup=None)
+
+
+async def cb_completion_yes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+
+    event_id = int(query.data[8:])  # strip "cc:yes:"
+    event = await db.get_event_by_id(event_id)
+    if event:
+        await db.log_completion(
+            type="event",
+            staff_name=event["staff_name"],
+            chat_id=query.from_user.id,
+            title=event["title"],
+            cohort=event["cohort"],
+            event_ref=event.get("event_date") or event.get("week_start", ""),
+            completed=True,
+        )
+        row = [
+            _dt.now(_tz.utc).strftime("%Y-%m-%d %H:%M UTC"),
+            event["staff_name"], "Event",
+            event["title"], event["cohort"],
+            event.get("event_date") or event.get("week_start", ""), "Yes", "",
+        ]
+        asyncio.create_task(asyncio.to_thread(append_completion_row, row))
+
+    await query.edit_message_text(msg.COMPLETION_YES_ACK)
+
+
+async def cb_completion_no(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if not query:
+        return ConversationHandler.END
+    await query.answer()
+
+    event_id = int(query.data[7:])  # strip "cc:no:"
+    event = await db.get_event_by_id(event_id)
+    if not event:
+        await query.edit_message_text("Event no longer found.")
+        return ConversationHandler.END
+
+    context.user_data["pending_completion"] = {
+        "event_id": event_id,
+        "staff_name": event["staff_name"],
+        "title": event["title"],
+        "cohort": event["cohort"],
+        "event_ref": event.get("event_date") or event.get("week_start", ""),
+        "chat_id": query.from_user.id,
+    }
+    await query.edit_message_text(msg.COMPLETION_NO_PROMPT)
+    return AWAITING_REASON
+
+
+async def cb_completion_reason(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if not update.message:
+        return AWAITING_REASON
+
+    pending = context.user_data.pop("pending_completion", None)
+    if not pending:
+        return ConversationHandler.END
+
+    reason = update.message.text.strip()
+    await db.log_completion(
+        type="event",
+        staff_name=pending["staff_name"],
+        chat_id=pending["chat_id"],
+        title=pending["title"],
+        cohort=pending["cohort"],
+        event_ref=pending["event_ref"],
+        completed=False,
+        reason=reason,
+    )
+    row = [
+        _dt.now(_tz.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        pending["staff_name"], "Event",
+        pending["title"], pending["cohort"],
+        pending["event_ref"], "No", reason,
+    ]
+    asyncio.create_task(asyncio.to_thread(append_completion_row, row))
+    await update.message.reply_text(msg.COMPLETION_NO_ACK)
+    return ConversationHandler.END
 
 
 async def cb_reload_affected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -390,6 +487,16 @@ async def cmd_sync_status(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 def build_app() -> Application:
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
+    completion_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(cb_completion_no, pattern=r"^cc:no:")],
+        states={
+            AWAITING_REASON: [MessageHandler(filters.TEXT & ~filters.COMMAND, cb_completion_reason)],
+        },
+        fallbacks=[],
+        per_chat=True,
+        per_message=False,
+    )
+
     remind_conv = ConversationHandler(
         entry_points=[
             CommandHandler("remind", cmd_remind),
@@ -403,7 +510,9 @@ def build_app() -> Application:
         per_message=False,
     )
 
+    app.add_handler(completion_conv)
     app.add_handler(remind_conv)
+    app.add_handler(CallbackQueryHandler(cb_completion_yes, pattern=r"^cc:yes:"))
     app.add_handler(CallbackQueryHandler(cb_weekly_complete, pattern=r"^wc:"))
     app.add_handler(CallbackQueryHandler(cb_reload_affected, pattern=r"^ra:"))
     app.add_handler(CallbackQueryHandler(cb_reload_notify, pattern=r"^rn:"))

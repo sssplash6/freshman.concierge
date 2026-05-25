@@ -4,7 +4,7 @@ from datetime import date
 
 logger = logging.getLogger(__name__)
 
-_SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 MONTH_MAP = {
     "january": 1, "february": 2, "march": 3, "april": 4,
@@ -213,6 +213,27 @@ def parse_consults_grid(rows: list[list[str]]) -> list[dict]:
             })
 
     return events
+
+
+_COMPLETIONS_HEADERS = ["Timestamp", "Staff Name", "Type", "Title", "Cohort", "Date", "Completed", "Reason"]
+
+
+def append_completion_row(row: list) -> None:
+    import gspread
+    from google.oauth2.service_account import Credentials
+    from config import GOOGLE_SERVICE_ACCOUNT_JSON, GOOGLE_SHEETS_ID
+
+    creds = Credentials.from_service_account_info(GOOGLE_SERVICE_ACCOUNT_JSON, scopes=_SCOPES)
+    gc = gspread.Client(auth=creds)
+    sh = gc.open_by_key(GOOGLE_SHEETS_ID)
+
+    try:
+        ws = sh.worksheet("Completions Log")
+    except gspread.exceptions.WorksheetNotFound:
+        ws = sh.add_worksheet("Completions Log", rows=1000, cols=len(_COMPLETIONS_HEADERS))
+        ws.append_row(_COMPLETIONS_HEADERS)
+
+    ws.append_row(row)
 
 
 def fetch_all_events() -> list[dict]:

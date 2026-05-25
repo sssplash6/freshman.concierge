@@ -77,6 +77,17 @@ WEEKLY_TASK_REMINDER = (
     "📅 Week of {date}</blockquote>"
 )
 
+COMPLETION_CHECK = (
+    "⏱ <b>Session check-in</b>\n"
+    "<blockquote>{icon} {title}\n"
+    "👥 {cohort}\n"
+    "📅 {date}</blockquote>\n\n"
+    "Did you complete this session?"
+)
+COMPLETION_YES_ACK = "✅ Got it, logged as completed. Thanks!"
+COMPLETION_NO_PROMPT = "Got it. What happened? Please type a brief reason."
+COMPLETION_NO_ACK = "📝 Noted. Thanks for the update."
+
 FALLBACK = "Tap 📅 My Schedule to see your upcoming sessions, or send /start to register."
 
 SYNC_STATUS_NONE = "No sync has been run yet."

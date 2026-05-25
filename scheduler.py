@@ -183,6 +183,51 @@ async def check_and_send_reminders(bot: Bot) -> None:
                 logger.error("Failed to send reminder to %d: %s", staff["chat_id"], e)
 
 
+async def send_completion_checks(bot: Bot) -> None:
+    """Send a Y/N completion check 2 hours after any timed event."""
+    now = datetime.now(TZ)
+    events = await db.get_all_events()
+    staff_list = await db.get_all_staff()
+
+    for event in events:
+        if not event.get("event_date") or not event.get("event_time"):
+            continue
+        d = date.fromisoformat(event["event_date"])
+        h, m = map(int, event["event_time"].split(":"))
+        check_dt = TZ.localize(datetime(d.year, d.month, d.day, h, m)) + timedelta(hours=2)
+        if not (check_dt <= now <= check_dt + timedelta(minutes=30)):
+            continue
+
+        icon = "🎓" if event["type"] == "lecture" else "📋"
+        text = msg.COMPLETION_CHECK.format(
+            icon=icon,
+            title=_e(event["title"]),
+            cohort=_e(event["cohort"]),
+            date=f"{d.strftime('%A, %B %-d')} · {event['event_time']} GMT+5",
+        )
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ Yes", callback_data=f"cc:yes:{event['id']}"),
+            InlineKeyboardButton("❌ No",  callback_data=f"cc:no:{event['id']}"),
+        ]])
+
+        for staff in staff_list:
+            if staff["display_name"] != event["staff_name"]:
+                continue
+            if await db.completion_prompt_sent(event["id"], staff["chat_id"]):
+                continue
+            try:
+                await bot.send_message(
+                    chat_id=staff["chat_id"],
+                    text=text,
+                    parse_mode="HTML",
+                    reply_markup=keyboard,
+                )
+                await db.mark_completion_prompt_sent(event["id"], staff["chat_id"])
+                logger.info("Sent completion check for event %d to chat %d", event["id"], staff["chat_id"])
+            except TelegramError as e:
+                logger.error("Failed to send completion check to %d: %s", staff["chat_id"], e)
+
+
 async def sync_schedule(bot: Bot) -> None:
     """Re-fetch Google Sheets and replace events in DB."""
     from sheets_parser import fetch_all_events
@@ -227,6 +272,14 @@ async def init_scheduler(bot: Bot) -> None:
         seconds=60,
         kwargs={"bot": bot},
         id="reminder_check",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        send_completion_checks,
+        trigger="interval",
+        seconds=60,
+        kwargs={"bot": bot},
+        id="completion_check",
         replace_existing=True,
     )
     scheduler.add_job(

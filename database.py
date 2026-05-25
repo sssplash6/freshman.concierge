@@ -47,6 +47,27 @@ async def init_db() -> None:
             )
         """)
         await db.execute("""
+            CREATE TABLE IF NOT EXISTS completions_log (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                type        TEXT NOT NULL,
+                staff_name  TEXT NOT NULL,
+                chat_id     INTEGER NOT NULL,
+                title       TEXT NOT NULL,
+                cohort      TEXT NOT NULL,
+                event_ref   TEXT NOT NULL,
+                completed   INTEGER NOT NULL,
+                reason      TEXT,
+                answered_at TEXT NOT NULL
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS completion_prompts_sent (
+                event_id INTEGER NOT NULL,
+                chat_id  INTEGER NOT NULL,
+                PRIMARY KEY (event_id, chat_id)
+            )
+        """)
+        await db.execute("""
             CREATE TABLE IF NOT EXISTS weekly_completions (
                 chat_id    INTEGER NOT NULL,
                 week_start TEXT NOT NULL,
@@ -221,6 +242,47 @@ async def log_sync(event_count: int) -> None:
         await db.execute(
             "INSERT INTO sync_log (synced_at, event_count) VALUES (?, ?)",
             (datetime.now(timezone.utc).isoformat(), event_count),
+        )
+        await db.commit()
+
+
+async def completion_prompt_sent(event_id: int, chat_id: int) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT 1 FROM completion_prompts_sent WHERE event_id=? AND chat_id=?",
+            (event_id, chat_id),
+        )
+        return await cursor.fetchone() is not None
+
+
+async def mark_completion_prompt_sent(event_id: int, chat_id: int) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT OR IGNORE INTO completion_prompts_sent (event_id, chat_id) VALUES (?,?)",
+            (event_id, chat_id),
+        )
+        await db.commit()
+
+
+async def log_completion(
+    type: str,
+    staff_name: str,
+    chat_id: int,
+    title: str,
+    cohort: str,
+    event_ref: str,
+    completed: bool,
+    reason: str | None = None,
+) -> None:
+    answered_at = datetime.now(timezone.utc).isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            INSERT INTO completions_log
+                (type, staff_name, chat_id, title, cohort, event_ref, completed, reason, answered_at)
+            VALUES (?,?,?,?,?,?,?,?,?)
+            """,
+            (type, staff_name, chat_id, title, cohort, event_ref, int(completed), reason, answered_at),
         )
         await db.commit()
 
