@@ -2,6 +2,8 @@ import logging
 import re
 from datetime import date
 
+_re = re
+
 logger = logging.getLogger(__name__)
 
 _SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
@@ -216,6 +218,224 @@ def parse_consults_grid(rows: list[list[str]]) -> list[dict]:
 
 
 _COMPLETIONS_HEADERS = ["Timestamp", "Staff Name", "Type", "Title", "Cohort", "Date", "Completed", "Reason"]
+_LOG = "Completions Log"
+_DASH = "Dashboard"
+
+
+def _rgb(r: float, g: float, b: float) -> dict:
+    return {"red": r, "green": g, "blue": b}
+
+
+def _setup_log_sheet(ws) -> None:
+    sid = ws.id
+    sh = ws.spreadsheet
+    # Column widths: Timestamp, Staff, Type, Title, Cohort, Date, Completed, Reason
+    col_widths = [175, 110, 110, 220, 130, 110, 100, 290]
+    requests = [
+        # Header row: dark navy bg, white bold text, centered, 36px tall
+        {
+            "repeatCell": {
+                "range": {"sheetId": sid, "startRowIndex": 0, "endRowIndex": 1,
+                          "startColumnIndex": 0, "endColumnIndex": 8},
+                "cell": {"userEnteredFormat": {
+                    "backgroundColor": _rgb(0.129, 0.196, 0.341),
+                    "textFormat": {"bold": True, "fontSize": 11,
+                                   "foregroundColor": _rgb(1, 1, 1)},
+                    "horizontalAlignment": "CENTER",
+                    "verticalAlignment": "MIDDLE",
+                }},
+                "fields": "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment)",
+            }
+        },
+        # Freeze header row
+        {
+            "updateSheetProperties": {
+                "properties": {"sheetId": sid,
+                               "gridProperties": {"frozenRowCount": 1}},
+                "fields": "gridProperties.frozenRowCount",
+            }
+        },
+        # Header row height
+        {
+            "updateDimensionProperties": {
+                "range": {"sheetId": sid, "dimension": "ROWS",
+                          "startIndex": 0, "endIndex": 1},
+                "properties": {"pixelSize": 36},
+                "fields": "pixelSize",
+            }
+        },
+    ]
+    for i, w in enumerate(col_widths):
+        requests.append({
+            "updateDimensionProperties": {
+                "range": {"sheetId": sid, "dimension": "COLUMNS",
+                          "startIndex": i, "endIndex": i + 1},
+                "properties": {"pixelSize": w},
+                "fields": "pixelSize",
+            }
+        })
+    sh.batch_update({"requests": requests})
+
+
+def _format_log_row(ws, row_idx: int, completed: bool) -> None:
+    sid = ws.id
+    i = row_idx - 1  # 0-based
+    row_bg = _rgb(0.851, 0.957, 0.851) if completed else _rgb(0.988, 0.894, 0.882)
+    badge_bg = _rgb(0.204, 0.659, 0.325) if completed else _rgb(0.820, 0.165, 0.118)
+    ws.spreadsheet.batch_update({"requests": [
+        {
+            "repeatCell": {
+                "range": {"sheetId": sid, "startRowIndex": i, "endRowIndex": i + 1,
+                          "startColumnIndex": 0, "endColumnIndex": 8},
+                "cell": {"userEnteredFormat": {
+                    "backgroundColor": row_bg,
+                    "verticalAlignment": "MIDDLE",
+                }},
+                "fields": "userEnteredFormat(backgroundColor,verticalAlignment)",
+            }
+        },
+        # "Yes" / "No" badge — column G (index 6)
+        {
+            "repeatCell": {
+                "range": {"sheetId": sid, "startRowIndex": i, "endRowIndex": i + 1,
+                          "startColumnIndex": 6, "endColumnIndex": 7},
+                "cell": {"userEnteredFormat": {
+                    "backgroundColor": badge_bg,
+                    "textFormat": {"bold": True,
+                                   "foregroundColor": _rgb(1, 1, 1)},
+                    "horizontalAlignment": "CENTER",
+                }},
+                "fields": "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)",
+            }
+        },
+    ]})
+
+
+def _setup_dashboard(sh) -> None:
+    import gspread
+    from config import STAFF_IDS
+    staff_names = sorted(set(STAFF_IDS.values()))
+    log = f"'{_LOG}'"
+
+    try:
+        dash = sh.worksheet(_DASH)
+    except gspread.exceptions.WorksheetNotFound:
+        dash = sh.add_worksheet(_DASH, rows=200, cols=6)
+
+    # --- Build cell grid ---
+    data: list[list] = [
+        ["📊 Completions Dashboard", "", "", "", "", ""],
+        [""],
+        ["", "Events ✅", "Events ❌", "Weekly Tasks ✅", "Completion Rate", ""],
+        [
+            "TOTALS",
+            f"=COUNTIFS({log}!G:G,\"Yes\",{log}!C:C,\"Event\")",
+            f"=COUNTIFS({log}!G:G,\"No\",{log}!C:C,\"Event\")",
+            f"=COUNTIFS({log}!G:G,\"Yes\",{log}!C:C,\"Weekly Task\")",
+            f"=IFERROR(TEXT(B4/(B4+C4),\"0%\"),\"—\")",
+            "",
+        ],
+        [""],
+        ["Staff Breakdown", "Events ✅", "Events ❌", "Weekly Tasks ✅", "Rate", ""],
+    ]
+    for name in staff_names:
+        row_n = len(data) + 1
+        data.append([
+            name,
+            f"=COUNTIFS({log}!B:B,\"{name}\",{log}!G:G,\"Yes\",{log}!C:C,\"Event\")",
+            f"=COUNTIFS({log}!B:B,\"{name}\",{log}!G:G,\"No\",{log}!C:C,\"Event\")",
+            f"=COUNTIFS({log}!B:B,\"{name}\",{log}!G:G,\"Yes\",{log}!C:C,\"Weekly Task\")",
+            f"=IFERROR(TEXT(B{row_n}/(B{row_n}+C{row_n}),\"0%\"),\"—\")",
+            "",
+        ])
+
+    recent_start = len(data) + 2
+    data.append([""])
+    data.append(["Recent Non-Completions", "", "", "", "", ""])
+    data.append([
+        f"=IFERROR(QUERY({log}!A:H,\"SELECT A,B,D,E,F,H WHERE G='No' ORDER BY A DESC LIMIT 15 LABEL A 'When',B 'Staff',D 'Title',E 'Cohort',F 'Date',H 'Reason'\",1),\"No non-completions yet\")",
+        "", "", "", "", "",
+    ])
+
+    dash.update("A1", data, value_input_option="USER_ENTERED")
+
+    sid = dash.id
+    requests = [
+        # Title: big, bold, dark
+        {
+            "repeatCell": {
+                "range": {"sheetId": sid, "startRowIndex": 0, "endRowIndex": 1,
+                          "startColumnIndex": 0, "endColumnIndex": 6},
+                "cell": {"userEnteredFormat": {
+                    "backgroundColor": _rgb(0.129, 0.196, 0.341),
+                    "textFormat": {"bold": True, "fontSize": 16,
+                                   "foregroundColor": _rgb(1, 1, 1)},
+                    "horizontalAlignment": "CENTER",
+                    "verticalAlignment": "MIDDLE",
+                }},
+                "fields": "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment)",
+            }
+        },
+        # Title row height
+        {
+            "updateDimensionProperties": {
+                "range": {"sheetId": sid, "dimension": "ROWS",
+                          "startIndex": 0, "endIndex": 1},
+                "properties": {"pixelSize": 48},
+                "fields": "pixelSize",
+            }
+        },
+        # Section header rows (row 3 = index 2, row 6 = index 5, recent_start-1)
+        *[
+            {
+                "repeatCell": {
+                    "range": {"sheetId": sid, "startRowIndex": r, "endRowIndex": r + 1,
+                              "startColumnIndex": 0, "endColumnIndex": 6},
+                    "cell": {"userEnteredFormat": {
+                        "backgroundColor": _rgb(0.824, 0.882, 0.953),
+                        "textFormat": {"bold": True, "fontSize": 10},
+                        "verticalAlignment": "MIDDLE",
+                    }},
+                    "fields": "userEnteredFormat(backgroundColor,textFormat,verticalAlignment)",
+                }
+            }
+            for r in [2, 5, recent_start - 1]
+        ],
+        # Totals row (row 4 = index 3): white bg, bold
+        {
+            "repeatCell": {
+                "range": {"sheetId": sid, "startRowIndex": 3, "endRowIndex": 4,
+                          "startColumnIndex": 0, "endColumnIndex": 6},
+                "cell": {"userEnteredFormat": {
+                    "backgroundColor": _rgb(0.953, 0.953, 0.953),
+                    "textFormat": {"bold": True},
+                    "verticalAlignment": "MIDDLE",
+                }},
+                "fields": "userEnteredFormat(backgroundColor,textFormat,verticalAlignment)",
+            }
+        },
+        # Column widths for Dashboard
+        *[
+            {
+                "updateDimensionProperties": {
+                    "range": {"sheetId": sid, "dimension": "COLUMNS",
+                              "startIndex": i, "endIndex": i + 1},
+                    "properties": {"pixelSize": w},
+                    "fields": "pixelSize",
+                }
+            }
+            for i, w in enumerate([160, 110, 110, 140, 80, 40])
+        ],
+        # Freeze header row
+        {
+            "updateSheetProperties": {
+                "properties": {"sheetId": sid,
+                               "gridProperties": {"frozenRowCount": 1}},
+                "fields": "gridProperties.frozenRowCount",
+            }
+        },
+    ]
+    sh.batch_update({"requests": requests})
 
 
 def append_completion_row(row: list) -> None:
@@ -227,13 +447,25 @@ def append_completion_row(row: list) -> None:
     gc = gspread.Client(auth=creds)
     sh = gc.open_by_key(GOOGLE_SHEETS_ID)
 
+    is_new = False
     try:
-        ws = sh.worksheet("Completions Log")
+        ws = sh.worksheet(_LOG)
     except gspread.exceptions.WorksheetNotFound:
-        ws = sh.add_worksheet("Completions Log", rows=1000, cols=len(_COMPLETIONS_HEADERS))
-        ws.append_row(_COMPLETIONS_HEADERS)
+        ws = sh.add_worksheet(_LOG, rows=2000, cols=len(_COMPLETIONS_HEADERS))
+        ws.append_row(_COMPLETIONS_HEADERS, value_input_option="USER_ENTERED")
+        is_new = True
 
-    ws.append_row(row)
+    result = ws.append_row(row, value_input_option="USER_ENTERED")
+    updated = result.get("updates", {}).get("updatedRange", "")
+    m = _re.search(r"[A-Z](\d+):", updated)
+    row_idx = int(m.group(1)) if m else None
+
+    if is_new:
+        _setup_log_sheet(ws)
+        _setup_dashboard(sh)
+
+    if row_idx:
+        _format_log_row(ws, row_idx, completed=(row[6] == "Yes"))
 
 
 def fetch_all_events() -> list[dict]:
