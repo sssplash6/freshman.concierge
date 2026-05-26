@@ -46,6 +46,8 @@ SELECT_PERSON, SELECT_EVENT = range(2)
 AWAITING_REASON = 0   # state for completion_conv
 SETLINK_COHORT = 0    # states for setlink_conv
 SETLINK_URL    = 1
+SETGROUP_COHORT = 0   # states for setgroup_conv
+SETGROUP_ID     = 1
 
 logger = logging.getLogger(__name__)
 
@@ -306,6 +308,86 @@ async def cb_setlink_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         parse_mode="HTML",
     )
     return ConversationHandler.END
+
+
+async def cmd_setgroup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if not update.effective_user or not update.message:
+        return ConversationHandler.END
+    if update.effective_user.id not in REMIND_IDS and update.effective_user.id != ADMIN_CHAT_ID:
+        await update.message.reply_text(msg.ADMIN_ONLY)
+        return ConversationHandler.END
+
+    cohorts = await db.get_all_cohorts()
+    if not cohorts:
+        await update.message.reply_text(msg.SETGROUP_NO_COHORTS)
+        return ConversationHandler.END
+
+    keyboard = [[InlineKeyboardButton(c, callback_data=f"sg:{c}")] for c in cohorts]
+    keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="sg:cancel")])
+    await update.message.reply_text(
+        msg.SETGROUP_CHOOSE_COHORT,
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
+    return SETGROUP_COHORT
+
+
+async def cb_setgroup_cohort(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if not query:
+        return ConversationHandler.END
+    await query.answer()
+
+    if query.data == "sg:cancel":
+        await query.edit_message_text("Cancelled.")
+        return ConversationHandler.END
+
+    cohort = query.data[3:]
+    context.user_data["setgroup_cohort"] = cohort
+    await query.edit_message_text(
+        msg.SETGROUP_ENTER_ID.format(cohort=_e(cohort)),
+        parse_mode="HTML",
+    )
+    return SETGROUP_ID
+
+
+async def cb_setgroup_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if not update.message:
+        return SETGROUP_ID
+
+    text = update.message.text.strip()
+    try:
+        chat_id = int(text)
+        if chat_id >= 0:
+            raise ValueError
+    except ValueError:
+        await update.message.reply_text(msg.SETGROUP_INVALID, parse_mode="HTML")
+        return SETGROUP_ID
+
+    cohort = context.user_data.pop("setgroup_cohort", None)
+    if not cohort:
+        return ConversationHandler.END
+
+    await db.set_group_chat(cohort, chat_id)
+    await update.message.reply_text(msg.SETGROUP_SAVED.format(cohort=_e(cohort)), parse_mode="HTML")
+    return ConversationHandler.END
+
+
+async def cmd_listgroups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_user or not update.message:
+        return
+    if update.effective_user.id not in REMIND_IDS and update.effective_user.id != ADMIN_CHAT_ID:
+        await update.message.reply_text(msg.ADMIN_ONLY)
+        return
+
+    groups = await db.get_all_group_chats()
+    if not groups:
+        await update.message.reply_text(msg.SETGROUP_LIST_NONE)
+        return
+
+    lines = [msg.SETGROUP_LIST_HEADER]
+    for cohort, chat_id in sorted(groups.items()):
+        lines.append(msg.SETGROUP_LIST_ROW.format(cohort=_e(cohort), chat_id=chat_id))
+    await update.message.reply_text("".join(lines), parse_mode="HTML")
 
 
 async def handle_fallback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -591,7 +673,19 @@ def build_app() -> Application:
         per_message=False,
     )
 
+    setgroup_conv = ConversationHandler(
+        entry_points=[CommandHandler("setgroup", cmd_setgroup)],
+        states={
+            SETGROUP_COHORT: [CallbackQueryHandler(cb_setgroup_cohort, pattern=r"^sg:")],
+            SETGROUP_ID:     [MessageHandler(filters.TEXT & ~filters.COMMAND, cb_setgroup_id)],
+        },
+        fallbacks=[CallbackQueryHandler(cb_setgroup_cohort, pattern=r"^sg:cancel$")],
+        per_chat=True,
+        per_message=False,
+    )
+
     app.add_handler(setlink_conv)
+    app.add_handler(setgroup_conv)
     app.add_handler(completion_conv)
     app.add_handler(remind_conv)
     app.add_handler(CallbackQueryHandler(cb_completion_yes, pattern=r"^cc:yes:"))
@@ -606,6 +700,7 @@ def build_app() -> Application:
     app.add_handler(MessageHandler(filters.Text(["🔄 Reload"]), cmd_reload))
     app.add_handler(CommandHandler("sync_status", cmd_sync_status))
     app.add_handler(MessageHandler(filters.Text(["📊 Sync Status"]), cmd_sync_status))
+    app.add_handler(CommandHandler("listgroups", cmd_listgroups))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_fallback))
     app.add_error_handler(_handle_error)
 

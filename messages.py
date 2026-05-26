@@ -99,6 +99,15 @@ CONSULT_LINK_POST = (
     "🌐 {link}</blockquote>"
 )
 
+SETGROUP_CHOOSE_COHORT = "🏘 Choose a cohort to assign a group chat to:"
+SETGROUP_ENTER_ID = "Send the group chat ID for <b>{cohort}</b> (a negative number like <code>-1001234567890</code>).\n\nTip: add @userinfobot to the group to get the ID."
+SETGROUP_SAVED = "✅ Group chat saved for <b>{cohort}</b>."
+SETGROUP_INVALID = "That doesn't look like a valid group chat ID. Send a negative integer (e.g. <code>-1001234567890</code>)."
+SETGROUP_NO_COHORTS = "No cohorts found in the schedule. Run a sync first."
+SETGROUP_LIST_HEADER = "🏘 <b>Configured group chats</b>\n\n"
+SETGROUP_LIST_ROW = "• <b>{cohort}</b>: <code>{chat_id}</code>\n"
+SETGROUP_LIST_NONE = "No group chats configured yet."
+
 FALLBACK = "Tap 📅 My Schedule to see your upcoming sessions, or send /start to register."
 
 SYNC_STATUS_NONE = "No sync has been run yet."

@@ -230,10 +230,10 @@ async def send_completion_checks(bot: Bot) -> None:
 
 async def send_weekly_consult_links(bot: Bot) -> None:
     """Every Monday: post each staff member's consultation link to the relevant group chat."""
-    from config import COHORT_GROUP_CHATS
     today = datetime.now(TZ).date()
     week_start_str = today.isoformat()
 
+    group_chats = await db.get_all_group_chats()
     links = await db.get_all_consult_links()
     events = await db.get_all_events()
 
@@ -247,7 +247,7 @@ async def send_weekly_consult_links(bot: Bot) -> None:
         pair = (entry["staff_name"], entry["cohort"])
         if pair not in active_pairs:
             continue
-        group_id = COHORT_GROUP_CHATS.get(entry["cohort"])
+        group_id = group_chats.get(entry["cohort"])
         if not group_id:
             logger.warning("No group chat configured for cohort %r — skipping link post", entry["cohort"])
             continue

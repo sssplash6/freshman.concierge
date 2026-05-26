@@ -94,6 +94,19 @@ async def init_db() -> None:
                 PRIMARY KEY (chat_id, reminded_date, title, cohort)
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS cohort_group_chats (
+                cohort  TEXT PRIMARY KEY,
+                chat_id INTEGER NOT NULL
+            )
+        """)
+        # Seed from env var only for cohorts not already in DB
+        from config import COHORT_GROUP_CHATS as _env_chats
+        for cohort, chat_id in _env_chats.items():
+            await db.execute(
+                "INSERT OR IGNORE INTO cohort_group_chats (cohort, chat_id) VALUES (?,?)",
+                (cohort, chat_id),
+            )
         await db.commit()
 
 
@@ -380,6 +393,27 @@ async def log_weekly_reminder(chat_id: int, reminded_date: str, title: str, coho
             (chat_id, reminded_date, title, cohort),
         )
         await db.commit()
+
+
+async def set_group_chat(cohort: str, chat_id: int) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO cohort_group_chats (cohort, chat_id) VALUES (?,?) ON CONFLICT(cohort) DO UPDATE SET chat_id=excluded.chat_id",
+            (cohort, chat_id),
+        )
+        await db.commit()
+
+
+async def get_all_group_chats() -> dict[str, int]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("SELECT cohort, chat_id FROM cohort_group_chats")
+        return {row[0]: row[1] for row in await cursor.fetchall()}
+
+
+async def get_all_cohorts() -> list[str]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("SELECT DISTINCT cohort FROM events ORDER BY cohort")
+        return [r[0] for r in await cursor.fetchall()]
 
 
 async def get_last_sync() -> dict | None:
