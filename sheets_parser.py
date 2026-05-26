@@ -21,6 +21,7 @@ _NAME_ALIASES: dict[str, str] = {
     "valera": "Valera",
     "rustam": "Rustam",
     "nigel": "Nigel",
+    "sega": "Sega",
     "sanjar": "Sanjar",
     "alisher": "Alisher",
     "gulrukh": "Gulrukh",
