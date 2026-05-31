@@ -16,6 +16,9 @@ def _require(name: str) -> str:
 TELEGRAM_BOT_TOKEN: str = _require("TELEGRAM_BOT_TOKEN")
 ADMIN_CHAT_ID: int = int(_require("ADMIN_CHAT_ID"))
 GOOGLE_SHEETS_ID: str = _require("GOOGLE_SHEETS_ID")
+# Destination for the Completions Log / Dashboard tabs. Defaults to the main
+# sheet if unset, so existing deployments keep working.
+COMPLETIONS_SHEETS_ID: str = os.getenv("COMPLETIONS_SHEETS_ID", "").strip() or GOOGLE_SHEETS_ID
 GOOGLE_SERVICE_ACCOUNT_JSON: dict = json.loads(_require("GOOGLE_SERVICE_ACCOUNT_JSON"))
 DB_PATH: str = os.getenv("DB_PATH", "/tmp/concierge_bot.db")
 SYNC_INTERVAL_HOURS: int = int(os.getenv("SYNC_INTERVAL_HOURS", "6"))

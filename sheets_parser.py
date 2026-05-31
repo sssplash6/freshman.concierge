@@ -441,11 +441,11 @@ def _setup_dashboard(sh) -> None:
 def append_completion_row(row: list) -> None:
     import gspread
     from google.oauth2.service_account import Credentials
-    from config import GOOGLE_SERVICE_ACCOUNT_JSON, GOOGLE_SHEETS_ID
+    from config import GOOGLE_SERVICE_ACCOUNT_JSON, COMPLETIONS_SHEETS_ID
 
     creds = Credentials.from_service_account_info(GOOGLE_SERVICE_ACCOUNT_JSON, scopes=_SCOPES)
     gc = gspread.Client(auth=creds)
-    sh = gc.open_by_key(GOOGLE_SHEETS_ID)
+    sh = gc.open_by_key(COMPLETIONS_SHEETS_ID)
 
     is_new = False
     try:
