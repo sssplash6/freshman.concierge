@@ -2,6 +2,7 @@
 import html
 import logging
 import os
+import re
 from datetime import datetime, timedelta, date, timezone
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -41,6 +42,54 @@ def tz_label(dt: datetime) -> str:
     sign = "+" if minutes >= 0 else "-"
     h, m = divmod(abs(minutes), 60)
     return f"GMT{sign}{h}" + (f":{m:02d}" if m else "")
+
+
+_TZ_OFFSET_RE = re.compile(r"^(?:gmt|utc)?\s*([+-]?\d{1,2})(?::?(\d{2}))?$", re.IGNORECASE)
+
+
+def parse_timezone_input(text: str) -> str | None:
+    """Resolve free-form user input to a canonical zone name, or None if unreadable.
+
+    Accepts 'GMT+5', 'UTC+5', '+5', '5', 'gmt-3', and full IANA names like
+    'Asia/Tashkent'. Whole-hour offsets only (returns 'UTC' or an 'Etc/GMT±N' zone
+    that pytz can load and that displays as 'GMT±N').
+    """
+    s = (text or "").strip()
+    if not s:
+        return None
+    if s.lower() in ("utc", "gmt"):
+        return "UTC"
+    # Named / IANA zone (e.g. 'Asia/Tashkent', 'UTC').
+    try:
+        pytz.timezone(s)
+        return s
+    except Exception:
+        pass
+    m = _TZ_OFFSET_RE.match(s)
+    if not m:
+        return None
+    if int(m.group(2) or 0) != 0:
+        return None  # only whole-hour offsets supported via typed entry
+    hours = int(m.group(1))
+    if not (-12 <= hours <= 14):
+        return None
+    if hours == 0:
+        return "UTC"
+    # Etc/GMT signs are inverted: Etc/GMT-5 == UTC+5.
+    name = f"Etc/GMT{'-' if hours > 0 else '+'}{abs(hours)}"
+    try:
+        pytz.timezone(name)
+        return name
+    except Exception:
+        return None
+
+
+def tz_pretty(name: str) -> str:
+    """Human label for a stored zone: 'GMT+5' for offsets, 'Asia/Tashkent (GMT+5)' for IANA."""
+    label = tz_label(datetime.now(pytz.timezone(name)))
+    if name == "UTC" or name.startswith("Etc/"):
+        return label
+    return f"{name} ({label})"
 
 
 def event_instant(event: dict) -> datetime | None:

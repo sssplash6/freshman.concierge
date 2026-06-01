@@ -7,9 +7,20 @@ REGISTERED = (
 )
 
 TZ_PROMPT = (
-    "📍 Tap the button below to share your location once. I'll use it only to set "
-    "your reminder timezone — your reminders and check-ins will then follow that "
-    "zone.\n\nYou can update it any time with /timezone."
+    "🕔 Let's set your timezone so reminders arrive at the right local time.\n\n"
+    "📱 <b>On your phone:</b> tap “📍 Share my location” below.\n"
+    "💻 <b>On desktop:</b> just type your timezone — e.g. <code>GMT+5</code>, "
+    "<code>UTC+5</code>, or an area name like <code>Asia/Tashkent</code>."
+)
+
+TZ_CONFIRM = (
+    "🕔 I read that as <b>{pretty}</b> — your local time would be <b>{time}</b>.\n"
+    "Is that right?"
+)
+
+TZ_INVALID = (
+    "🤔 I couldn't read that as a timezone. Try something like <code>GMT+5</code>, "
+    "<code>UTC-4</code>, or an area name like <code>Europe/Istanbul</code>."
 )
 
 TZ_SAVED = (

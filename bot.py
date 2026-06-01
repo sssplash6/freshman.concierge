@@ -20,6 +20,7 @@ from telegram.ext import (
 MAIN_KEYBOARD = ReplyKeyboardMarkup(
     [
         [KeyboardButton("📅 My Schedule"), KeyboardButton("🔗 Set Link")],
+        [KeyboardButton("🌍 Timezone")],
     ],
     resize_keyboard=True,
     is_persistent=True,
@@ -30,6 +31,7 @@ ADMIN_KEYBOARD = ReplyKeyboardMarkup(
         [KeyboardButton("📅 My Schedule"), KeyboardButton("🔗 Set Link")],
         [KeyboardButton("🔄 Reload"),      KeyboardButton("📊 Sync Status")],
         [KeyboardButton("📣 Remind"),      KeyboardButton("📝 Assign Task")],
+        [KeyboardButton("🌍 Timezone")],
     ],
     resize_keyboard=True,
     is_persistent=True,
@@ -48,6 +50,8 @@ from scheduler import (
     event_instant,
     tz_label,
     format_task_deadline,
+    parse_timezone_input,
+    tz_pretty,
     SOURCE_TZ,
 )
 from sheets_parser import append_completion_row
@@ -69,6 +73,7 @@ SETGROUP_ID     = 1
 TASK_PERSON   = 0     # states for task_conv
 TASK_DESC     = 1
 TASK_DEADLINE = 2
+TZ_TYPE       = 0     # state for timezone_conv
 
 logger = logging.getLogger(__name__)
 
@@ -77,56 +82,115 @@ async def _handle_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
     logger.exception("Unhandled bot error", exc_info=context.error)
 
 
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+def _main_keyboard_for(user_id: int) -> ReplyKeyboardMarkup:
+    is_admin = user_id in REMIND_IDS or user_id == ADMIN_CHAT_ID
+    return ADMIN_KEYBOARD if is_admin else MAIN_KEYBOARD
+
+
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if not update.effective_user or not update.message:
-        return
+        return ConversationHandler.END
     user_id = update.effective_user.id
     name = STAFF_IDS.get(user_id)
     if not name:
         await update.message.reply_text(msg.NOT_ON_ROSTER)
-        return
+        return ConversationHandler.END
     await db.upsert_staff(
         chat_id=user_id,
         username=update.effective_user.username,
         display_name=name,
     )
-    is_admin = user_id in REMIND_IDS or user_id == ADMIN_CHAT_ID
-    keyboard = ADMIN_KEYBOARD if is_admin else MAIN_KEYBOARD
-    await update.message.reply_text(msg.REGISTERED.format(name=name), reply_markup=keyboard)
-    await update.message.reply_text(msg.TZ_PROMPT, reply_markup=LOCATION_KEYBOARD)
+    await update.message.reply_text(
+        msg.REGISTERED.format(name=name), reply_markup=_main_keyboard_for(user_id)
+    )
+    await update.message.reply_text(
+        msg.TZ_PROMPT, parse_mode="HTML", reply_markup=LOCATION_KEYBOARD
+    )
+    return TZ_TYPE
 
 
-async def cmd_timezone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def cmd_timezone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if not update.effective_user or not update.message:
-        return
+        return ConversationHandler.END
     staff = await db.get_staff(update.effective_user.id)
     if not staff:
         await update.message.reply_text(msg.NOT_REGISTERED)
-        return
-    await update.message.reply_text(msg.TZ_PROMPT, reply_markup=LOCATION_KEYBOARD)
+        return ConversationHandler.END
+    await update.message.reply_text(
+        msg.TZ_PROMPT, parse_mode="HTML", reply_markup=LOCATION_KEYBOARD
+    )
+    return TZ_TYPE
 
 
-async def cb_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def cb_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if not update.message or not update.message.location or not update.effective_user:
-        return
+        return ConversationHandler.END
     user_id = update.effective_user.id
     staff = await db.get_staff(user_id)
     if not staff:
         await update.message.reply_text(msg.NOT_REGISTERED)
-        return
+        return ConversationHandler.END
 
     loc = update.message.location
     tz_name = _tf.timezone_at(lat=loc.latitude, lng=loc.longitude) or "Asia/Tashkent"
     await db.set_staff_timezone(user_id, tz_name)
 
     now_local = _dt.now(pytz.timezone(tz_name))
-    is_admin = user_id in REMIND_IDS or user_id == ADMIN_CHAT_ID
-    keyboard = ADMIN_KEYBOARD if is_admin else MAIN_KEYBOARD
     await update.message.reply_text(
-        msg.TZ_SAVED.format(zone=_e(tz_name), time=now_local.strftime("%H:%M")),
+        msg.TZ_SAVED.format(zone=_e(tz_pretty(tz_name)), time=now_local.strftime("%H:%M")),
+        parse_mode="HTML",
+        reply_markup=_main_keyboard_for(user_id),
+    )
+    return ConversationHandler.END
+
+
+async def cb_tz_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if not update.message or not update.effective_user:
+        return TZ_TYPE
+
+    tz_name = parse_timezone_input(update.message.text)
+    if not tz_name:
+        await update.message.reply_text(msg.TZ_INVALID, parse_mode="HTML")
+        return TZ_TYPE
+
+    now_local = _dt.now(pytz.timezone(tz_name))
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Yes", callback_data=f"tzset:{tz_name}"),
+        InlineKeyboardButton("✖ No",  callback_data="tzcancel"),
+    ]])
+    await update.message.reply_text(
+        msg.TZ_CONFIRM.format(pretty=_e(tz_pretty(tz_name)), time=now_local.strftime("%H:%M")),
         parse_mode="HTML",
         reply_markup=keyboard,
     )
+    return ConversationHandler.END
+
+
+async def cb_tz_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+
+    tz_name = query.data[len("tzset:"):]
+    user_id = query.from_user.id
+    await db.set_staff_timezone(user_id, tz_name)
+    now_local = _dt.now(pytz.timezone(tz_name))
+    await query.edit_message_reply_markup(reply_markup=None)
+    await query.message.reply_text(
+        msg.TZ_SAVED.format(zone=_e(tz_pretty(tz_name)), time=now_local.strftime("%H:%M")),
+        parse_mode="HTML",
+        reply_markup=_main_keyboard_for(user_id),
+    )
+
+
+async def cb_tz_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+    await query.edit_message_reply_markup(reply_markup=None)
+    await query.message.reply_text(msg.TZ_PROMPT, parse_mode="HTML", reply_markup=LOCATION_KEYBOARD)
 
 
 async def cmd_upcoming(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -963,6 +1027,23 @@ def build_app() -> Application:
         per_message=False,
     )
 
+    timezone_conv = ConversationHandler(
+        entry_points=[
+            CommandHandler("start", cmd_start),
+            CommandHandler("timezone", cmd_timezone),
+            MessageHandler(filters.Text(["🌍 Timezone"]), cmd_timezone),
+        ],
+        states={
+            TZ_TYPE: [
+                MessageHandler(filters.LOCATION, cb_location),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, cb_tz_text),
+            ],
+        },
+        fallbacks=[],
+        per_chat=True,
+        per_message=False,
+    )
+
     remind_conv = ConversationHandler(
         entry_points=[
             CommandHandler("remind", cmd_remind),
@@ -992,13 +1073,14 @@ def build_app() -> Application:
     app.add_handler(completion_conv)
     app.add_handler(remind_conv)
     app.add_handler(task_conv)
+    app.add_handler(timezone_conv)
     app.add_handler(CallbackQueryHandler(cb_completion_yes, pattern=r"^cc:yes:"))
     app.add_handler(CallbackQueryHandler(cb_task_yes, pattern=r"^tc:yes:"))
+    app.add_handler(CallbackQueryHandler(cb_tz_confirm, pattern=r"^tzset:"))
+    app.add_handler(CallbackQueryHandler(cb_tz_cancel, pattern=r"^tzcancel$"))
     app.add_handler(CallbackQueryHandler(cb_weekly_complete, pattern=r"^wc:"))
     app.add_handler(CallbackQueryHandler(cb_reload_affected, pattern=r"^ra:"))
     app.add_handler(CallbackQueryHandler(cb_reload_notify, pattern=r"^rn:"))
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("timezone", cmd_timezone))
     app.add_handler(MessageHandler(filters.LOCATION, cb_location))
     app.add_handler(CommandHandler("upcoming", cmd_upcoming))
     app.add_handler(MessageHandler(filters.Text(["📅 My Schedule"]), cmd_upcoming))

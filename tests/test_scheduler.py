@@ -11,6 +11,8 @@ from scheduler import (
     staff_tz,
     tz_label,
     event_instant,
+    parse_timezone_input,
+    tz_pretty,
 )
 
 TZ = pytz.timezone("Asia/Tashkent")
@@ -144,6 +146,33 @@ def test_lecture_display_converts_to_recipient_zone():
     ist = format_reminder_message(LECTURE, ISTANBUL)
     assert "19:30" in tash and "GMT+5" in tash
     assert "17:30" in ist and "GMT+3" in ist
+
+
+def test_parse_timezone_input_offsets():
+    # All of these mean UTC+5 -> stored as Etc/GMT-5, displayed as GMT+5.
+    for text in ("gmt+5", "utc+5", "GMT +5", "+5", "5", "utc+05:00"):
+        name = parse_timezone_input(text)
+        assert name == "Etc/GMT-5", text
+        assert tz_pretty(name) == "GMT+5"
+    assert parse_timezone_input("gmt-4") == "Etc/GMT+4"
+    assert tz_pretty("Etc/GMT+4") == "GMT-4"
+    assert parse_timezone_input("utc") == "UTC"
+
+
+def test_parse_timezone_input_iana_and_invalid():
+    assert parse_timezone_input("Asia/Tashkent") == "Asia/Tashkent"
+    assert tz_pretty("Asia/Tashkent") == "Asia/Tashkent (GMT+5)"
+    # Unreadable / unsupported inputs return None.
+    for bad in ("", "hello", "gmt+5:30", "+15", "Mars/Olympus"):
+        assert parse_timezone_input(bad) is None, bad
+
+
+def test_typed_offset_zone_drives_local_firing():
+    # A zone stored via typed entry behaves like any other for 10:00-local nudges.
+    event = {"type": "consult", "event_date": "2026-05-14", "event_time": None, "week_start": None}
+    tz = staff_tz({"timezone": parse_timezone_input("gmt+3")})
+    dt = compute_reminder_dt(event, tz)
+    assert dt.hour == 10 and tz_label(dt) == "GMT+3"
 
 
 def test_consult_nudge_fires_at_10am_local_per_zone():
