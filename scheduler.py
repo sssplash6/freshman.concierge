@@ -16,8 +16,40 @@ import database as db
 import messages as msg
 
 logger = logging.getLogger(__name__)
-TZ = pytz.timezone(os.getenv("TIMEZONE", "Asia/Tashkent"))
+DEFAULT_TZ = os.getenv("TIMEZONE", "Asia/Tashkent")
+TZ = pytz.timezone(DEFAULT_TZ)
+# Sheet event times are authored in the team's zone; this is the source of truth
+# for absolute event moments. Per-user zones only affect display and time-of-day
+# nudges (see staff_tz / compute_reminder_dt).
+SOURCE_TZ = TZ
 _scheduler: AsyncIOScheduler | None = None
+
+
+def staff_tz(staff: dict) -> pytz.BaseTzInfo:
+    """The recipient's preferred zone, falling back to the team zone."""
+    name = staff.get("timezone") or DEFAULT_TZ
+    try:
+        return pytz.timezone(name)
+    except Exception:
+        return SOURCE_TZ
+
+
+def tz_label(dt: datetime) -> str:
+    """Render a tz-aware datetime's UTC offset as 'GMT+5' / 'GMT+3' / 'GMT-4'."""
+    off = dt.utcoffset() or timedelta(0)
+    minutes = int(off.total_seconds() // 60)
+    sign = "+" if minutes >= 0 else "-"
+    h, m = divmod(abs(minutes), 60)
+    return f"GMT{sign}{h}" + (f":{m:02d}" if m else "")
+
+
+def event_instant(event: dict) -> datetime | None:
+    """The absolute moment of a timed event, interpreted in the team source zone."""
+    if not event.get("event_date") or not event.get("event_time"):
+        return None
+    d = date.fromisoformat(event["event_date"])
+    h, m = map(int, event["event_time"].split(":"))
+    return SOURCE_TZ.localize(datetime(d.year, d.month, d.day, h, m))
 
 # (staff_name, day_of_week, reminder_hour, reminder_min, cohort, weekday_label, time_label)
 _FIXED_SEMINARS = [
@@ -35,35 +67,49 @@ def get_scheduler() -> AsyncIOScheduler:
     return _scheduler
 
 
-def compute_reminder_dt(event: dict) -> datetime | None:
-    """Return the tz-aware datetime (GMT+5) when this event's reminder should fire."""
+def compute_reminder_dt(event: dict, tz: pytz.BaseTzInfo | None = None) -> datetime | None:
+    """When this event's reminder should fire, as a tz-aware datetime.
+
+    Lecture reminders are anchored to the event's absolute moment (1 hour before)
+    and are the same instant for everyone. Consultation reminders are a
+    time-of-day nudge at 10:00 in the recipient's zone (``tz``, default source).
+    """
+    tz = tz or SOURCE_TZ
     if event["type"] == "lecture":
-        if not event.get("event_date") or not event.get("event_time"):
-            return None
-        d = date.fromisoformat(event["event_date"])
-        h, m = map(int, event["event_time"].split(":"))
-        lecture_dt = TZ.localize(datetime(d.year, d.month, d.day, h, m))
-        return lecture_dt - timedelta(hours=1)
+        inst = event_instant(event)
+        return inst - timedelta(hours=1) if inst else None
     elif event["type"] == "consult":
-        if event.get("event_date"):
-            d = date.fromisoformat(event["event_date"])
-            return TZ.localize(datetime(d.year, d.month, d.day, 10, 0))
-        elif event.get("week_start"):
-            d = date.fromisoformat(event["week_start"])
-            return TZ.localize(datetime(d.year, d.month, d.day, 10, 0))
+        d_str = event.get("event_date") or event.get("week_start")
+        if d_str:
+            d = date.fromisoformat(d_str)
+            return tz.localize(datetime(d.year, d.month, d.day, 10, 0))
     return None
 
 
-def format_reminder_message(event: dict) -> str:
-    """Format a reminder message string for the given event."""
+def format_reminder_message(event: dict, tz: pytz.BaseTzInfo | None = None) -> str:
+    """Format a reminder message string for the given event in the recipient's zone."""
+    tz = tz or SOURCE_TZ
     if event["type"] == "lecture":
-        d = date.fromisoformat(event["event_date"])
+        inst = event_instant(event)
+        if inst:
+            local = inst.astimezone(tz)
+            weekday = local.strftime("%A")
+            datestr = local.strftime("%B %-d")
+            timestr = local.strftime("%H:%M")
+            label = tz_label(local)
+        else:
+            d = date.fromisoformat(event["event_date"])
+            weekday = d.strftime("%A")
+            datestr = d.strftime("%B %-d")
+            timestr = "TBD"
+            label = tz_label(tz.localize(datetime(d.year, d.month, d.day)))
         return msg.REMINDER_LECTURE.format(
             title=_e(event["title"]),
             cohort=_e(event["cohort"]),
-            weekday=d.strftime("%A"),
-            date=d.strftime("%B %-d"),
-            time=event["event_time"] or "TBD",
+            weekday=weekday,
+            date=datestr,
+            time=timestr,
+            tz=label,
         )
     elif event["type"] == "consult":
         if event.get("event_date"):
@@ -94,21 +140,28 @@ def format_weekly_task_reminder(event: dict) -> str:
 
 
 async def send_weekly_task_reminders(bot: Bot) -> None:
-    today = datetime.now(TZ).date()
-    week_start = today - timedelta(days=today.weekday())  # Monday of current week
-    week_start_str = week_start.isoformat()
-    today_str = today.isoformat()
+    """Daily 10:00 nudge (in each recipient's own zone) for pending weekly tasks.
 
+    Runs on a 60-second interval; the per-staff local 10:00–10:30 window plus the
+    once-per-day idempotency key keep it to a single send per task per day.
+    """
     events = await db.get_all_events()
     staff_list = await db.get_all_staff()
 
-    for event in events:
-        if not event.get("week_start") or event.get("event_date"):
+    for staff in staff_list:
+        now_local = datetime.now(staff_tz(staff))
+        # Only fire during the recipient's local 10:00–10:30 window.
+        if not (now_local.hour == 10 and now_local.minute < 30):
             continue
-        if event["week_start"] != week_start_str:
-            continue
+        today = now_local.date()
+        week_start_str = (today - timedelta(days=today.weekday())).isoformat()
+        today_str = today.isoformat()
 
-        for staff in staff_list:
+        for event in events:
+            if not event.get("week_start") or event.get("event_date"):
+                continue
+            if event["week_start"] != week_start_str:
+                continue
             if staff["display_name"] != event["staff_name"]:
                 continue
             if await db.is_weekly_complete(staff["chat_id"], week_start_str, event["title"], event["cohort"]):
@@ -147,32 +200,35 @@ async def send_seminar_reminder(
 
 
 async def check_and_send_reminders(bot: Bot) -> None:
-    """Check all events for due reminders and send them."""
-    now = datetime.now(TZ)
+    """Check all events for due reminders and send them, per recipient's zone."""
+    now = datetime.now(SOURCE_TZ)  # tz-aware; compares correctly against any zone
     events = await db.get_all_events()
     staff_list = await db.get_all_staff()
 
     for event in events:
-        reminder_dt = compute_reminder_dt(event)
-        if reminder_dt is None:
-            continue
-        # Fire if past reminder time and within a 30-minute grace window (idempotency prevents duplicates)
-        if not (reminder_dt <= now <= reminder_dt + timedelta(minutes=30)):
-            continue
-        try:
-            text = format_reminder_message(event)
-        except Exception:
-            logger.exception("Failed to format reminder for event %d", event["id"])
-            continue
-        # Weekly tasks (week_start + no event_date) are handled by send_weekly_task_reminders
+        # Week-based consults (week_start + no event_date) are nudged as recurring
+        # weekly tasks by send_weekly_task_reminders.
         if event.get("week_start") and not event.get("event_date"):
             continue
 
         for staff in staff_list:
             if staff["display_name"] != event["staff_name"]:
                 continue
+            tz = staff_tz(staff)
+            reminder_dt = compute_reminder_dt(event, tz)
+            if reminder_dt is None:
+                continue
+            # Fire if past reminder time and within a 30-minute grace window
+            # (idempotency prevents duplicates).
+            if not (reminder_dt <= now <= reminder_dt + timedelta(minutes=30)):
+                continue
             if await db.reminder_already_sent(event["id"], staff["chat_id"]):
                 continue
+            try:
+                text = format_reminder_message(event, tz)
+            except Exception:
+                logger.exception("Failed to format reminder for event %d", event["id"])
+                break
             try:
                 await bot.send_message(chat_id=staff["chat_id"], text=text, parse_mode="HTML")
                 await db.log_reminder(event["id"], staff["chat_id"])
@@ -185,26 +241,19 @@ async def check_and_send_reminders(bot: Bot) -> None:
 
 async def send_completion_checks(bot: Bot) -> None:
     """Send a Y/N completion check 2 hours after any timed event."""
-    now = datetime.now(TZ)
+    now = datetime.now(SOURCE_TZ)
     events = await db.get_all_events()
     staff_list = await db.get_all_staff()
 
     for event in events:
-        if not event.get("event_date") or not event.get("event_time"):
+        inst = event_instant(event)
+        if inst is None:
             continue
-        d = date.fromisoformat(event["event_date"])
-        h, m = map(int, event["event_time"].split(":"))
-        check_dt = TZ.localize(datetime(d.year, d.month, d.day, h, m)) + timedelta(hours=2)
+        check_dt = inst + timedelta(hours=2)  # absolute, same instant for everyone
         if not (check_dt <= now <= check_dt + timedelta(minutes=30)):
             continue
 
         icon = "🎓" if event["type"] == "lecture" else "📋"
-        text = msg.COMPLETION_CHECK.format(
-            icon=icon,
-            title=_e(event["title"]),
-            cohort=_e(event["cohort"]),
-            date=f"{d.strftime('%A, %B %-d')} · {event['event_time']} GMT+5",
-        )
         keyboard = InlineKeyboardMarkup([[
             InlineKeyboardButton("✅ Yes", callback_data=f"cc:yes:{event['id']}"),
             InlineKeyboardButton("❌ No",  callback_data=f"cc:no:{event['id']}"),
@@ -215,6 +264,13 @@ async def send_completion_checks(bot: Bot) -> None:
                 continue
             if await db.completion_prompt_sent(event["id"], staff["chat_id"]):
                 continue
+            local = inst.astimezone(staff_tz(staff))
+            text = msg.COMPLETION_CHECK.format(
+                icon=icon,
+                title=_e(event["title"]),
+                cohort=_e(event["cohort"]),
+                date=f"{local.strftime('%A, %B %-d')} · {local.strftime('%H:%M')} {tz_label(local)}",
+            )
             try:
                 await bot.send_message(
                     chat_id=staff["chat_id"],
@@ -336,12 +392,11 @@ async def init_scheduler(bot: Bot) -> None:
         id="weekly_consult_links",
         replace_existing=True,
     )
+    # Runs every minute; fires at 10:00 local time in each recipient's own zone.
     scheduler.add_job(
         send_weekly_task_reminders,
-        trigger="cron",
-        hour=10,
-        minute=0,
-        timezone=TZ,
+        trigger="interval",
+        seconds=60,
         kwargs={"bot": bot},
         id="weekly_task_reminders",
         replace_existing=True,

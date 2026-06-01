@@ -1,6 +1,21 @@
 # messages.py
 
-REGISTERED = "✅ You're registered as {name}. You'll receive reminders before your sessions."
+REGISTERED = (
+    "✅ You're registered as {name}. You'll receive reminders before your sessions.\n\n"
+    "One more thing — share your location so I can set your timezone and send "
+    "reminders at the right local time."
+)
+
+TZ_PROMPT = (
+    "📍 Tap the button below to share your location once. I'll use it only to set "
+    "your reminder timezone — your reminders and check-ins will then follow that "
+    "zone.\n\nYou can update it any time with /timezone."
+)
+
+TZ_SAVED = (
+    "✅ Timezone set to <b>{zone}</b> (your local time is now {time}).\n"
+    "All your reminders and check-ins will follow this zone."
+)
 
 NOT_ON_ROSTER = "You're not on the AP team roster. Contact the admin if this is a mistake."
 
@@ -21,7 +36,7 @@ UPCOMING_NONE = "No upcoming sessions found for your name."
 UPCOMING_LECTURE = (
     "🎓 <b>{title}</b>\n"
     "<blockquote>👥 {cohort}\n"
-    "📅 {weekday}, {date} · {time} GMT+5</blockquote>\n\n"
+    "📅 {weekday}, {date} · {time} {tz}</blockquote>\n\n"
 )
 
 UPCOMING_CONSULT_DATE = (
@@ -40,7 +55,7 @@ REMINDER_LECTURE = (
     "🔔 <b>Lecture in 1 hour</b>\n"
     "<blockquote>📚 {title}\n"
     "👥 {cohort}\n"
-    "📅 {weekday}, {date} · {time} GMT+5</blockquote>"
+    "📅 {weekday}, {date} · {time} {tz}</blockquote>"
 )
 
 REMINDER_CONSULT_DATE = (

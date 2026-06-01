@@ -35,12 +35,23 @@ ADMIN_KEYBOARD = ReplyKeyboardMarkup(
     is_persistent=True,
 )
 
+import pytz
+from timezonefinder import TimezoneFinder
+
 import database as db
 import messages as msg
 from config import ADMIN_CHAT_ID, REMIND_IDS, STAFF_IDS, TELEGRAM_BOT_TOKEN
 from datetime import datetime as _dt, timezone as _tz
-from scheduler import format_reminder_message
+from scheduler import format_reminder_message, staff_tz, event_instant, tz_label
 from sheets_parser import append_completion_row
+
+_tf = TimezoneFinder()
+
+LOCATION_KEYBOARD = ReplyKeyboardMarkup(
+    [[KeyboardButton("📍 Share my location", request_location=True)]],
+    resize_keyboard=True,
+    one_time_keyboard=True,
+)
 
 SELECT_PERSON, SELECT_EVENT = range(2)
 AWAITING_REASON = 0   # state for completion_conv
@@ -72,6 +83,40 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     is_admin = user_id in REMIND_IDS or user_id == ADMIN_CHAT_ID
     keyboard = ADMIN_KEYBOARD if is_admin else MAIN_KEYBOARD
     await update.message.reply_text(msg.REGISTERED.format(name=name), reply_markup=keyboard)
+    await update.message.reply_text(msg.TZ_PROMPT, reply_markup=LOCATION_KEYBOARD)
+
+
+async def cmd_timezone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_user or not update.message:
+        return
+    staff = await db.get_staff(update.effective_user.id)
+    if not staff:
+        await update.message.reply_text(msg.NOT_REGISTERED)
+        return
+    await update.message.reply_text(msg.TZ_PROMPT, reply_markup=LOCATION_KEYBOARD)
+
+
+async def cb_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message or not update.message.location or not update.effective_user:
+        return
+    user_id = update.effective_user.id
+    staff = await db.get_staff(user_id)
+    if not staff:
+        await update.message.reply_text(msg.NOT_REGISTERED)
+        return
+
+    loc = update.message.location
+    tz_name = _tf.timezone_at(lat=loc.latitude, lng=loc.longitude) or "Asia/Tashkent"
+    await db.set_staff_timezone(user_id, tz_name)
+
+    now_local = _dt.now(pytz.timezone(tz_name))
+    is_admin = user_id in REMIND_IDS or user_id == ADMIN_CHAT_ID
+    keyboard = ADMIN_KEYBOARD if is_admin else MAIN_KEYBOARD
+    await update.message.reply_text(
+        msg.TZ_SAVED.format(zone=_e(tz_name), time=now_local.strftime("%H:%M")),
+        parse_mode="HTML",
+        reply_markup=keyboard,
+    )
 
 
 async def cmd_upcoming(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -88,18 +133,29 @@ async def cmd_upcoming(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text(msg.UPCOMING_NONE)
         return
 
+    tz = staff_tz(staff)
     lines = [msg.UPCOMING_HEADER.format(count=len(events))]
     for e in events:
         try:
             if e.get("type") == "lecture":
-                d = date.fromisoformat(e["event_date"])
+                inst = event_instant(e)
+                if inst:
+                    local = inst.astimezone(tz)
+                    weekday, datestr = local.strftime("%A"), local.strftime("%B %-d")
+                    timestr, label = local.strftime("%H:%M"), tz_label(local)
+                else:
+                    d = date.fromisoformat(e["event_date"])
+                    weekday, datestr = d.strftime("%A"), d.strftime("%B %-d")
+                    timestr = "TBD"
+                    label = tz_label(tz.localize(_dt(d.year, d.month, d.day)))
                 lines.append(
                     msg.UPCOMING_LECTURE.format(
                         title=_e(e["title"]),
                         cohort=_e(e["cohort"]),
-                        weekday=d.strftime("%A"),
-                        date=d.strftime("%B %-d"),
-                        time=e["event_time"] or "TBD",
+                        weekday=weekday,
+                        date=datestr,
+                        time=timestr,
+                        tz=label,
                     )
                 )
             elif e.get("event_date"):
@@ -226,7 +282,7 @@ async def cb_remind_event(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await query.edit_message_text(f"⚠️ {_e(name)} hasn't started the bot yet — no chat to send to.")
         return ConversationHandler.END
 
-    text = format_reminder_message(event)
+    text = format_reminder_message(event, staff_tz(targets[0]))
     sent = 0
     for s in targets:
         try:
@@ -717,6 +773,8 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_reload_affected, pattern=r"^ra:"))
     app.add_handler(CallbackQueryHandler(cb_reload_notify, pattern=r"^rn:"))
     app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("timezone", cmd_timezone))
+    app.add_handler(MessageHandler(filters.LOCATION, cb_location))
     app.add_handler(CommandHandler("upcoming", cmd_upcoming))
     app.add_handler(MessageHandler(filters.Text(["📅 My Schedule"]), cmd_upcoming))
     app.add_handler(CommandHandler("cancel", cmd_cancel))

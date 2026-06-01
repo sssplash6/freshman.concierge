@@ -3,11 +3,18 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
-from scheduler import compute_reminder_dt, format_reminder_message
+from scheduler import (
+    compute_reminder_dt,
+    format_reminder_message,
+    staff_tz,
+    tz_label,
+    event_instant,
+)
 
 TZ = pytz.timezone("Asia/Tashkent")
+ISTANBUL = pytz.timezone("Europe/Istanbul")  # GMT+3
 
 
 def test_lecture_reminder_is_one_hour_before():
@@ -96,3 +103,54 @@ def test_format_reminder_consult_week():
     msg = format_reminder_message(event)
     assert "this week" in msg
     assert "30 min" in msg
+
+
+# --- Per-user timezone behavior --------------------------------------------
+
+def test_staff_tz_parses_and_falls_back():
+    assert staff_tz({"timezone": "Europe/Istanbul"}).zone == "Europe/Istanbul"
+    # Missing or invalid values fall back to the team source zone.
+    assert staff_tz({}).zone == "Asia/Tashkent"
+    assert staff_tz({"timezone": None}).zone == "Asia/Tashkent"
+    assert staff_tz({"timezone": "Not/AZone"}).zone == "Asia/Tashkent"
+
+
+def test_tz_label_formats_offset():
+    assert tz_label(TZ.localize(datetime(2026, 5, 9, 12))) == "GMT+5"
+    assert tz_label(ISTANBUL.localize(datetime(2026, 5, 9, 12))) == "GMT+3"
+    assert tz_label(pytz.UTC.localize(datetime(2026, 5, 9, 12))) == "GMT+0"
+
+
+LECTURE = {
+    "type": "lecture",
+    "title": "Lecture #3",
+    "cohort": "April Online",
+    "event_date": "2026-05-09",
+    "event_time": "19:30",
+    "duration_min": None,
+    "week_start": None,
+}
+
+
+def test_lecture_reminder_instant_is_zone_independent():
+    # Absolute firing moment is identical regardless of the recipient's zone.
+    assert compute_reminder_dt(LECTURE, TZ) == compute_reminder_dt(LECTURE, ISTANBUL)
+    assert compute_reminder_dt(LECTURE, TZ) == event_instant(LECTURE) - timedelta(hours=1)
+
+
+def test_lecture_display_converts_to_recipient_zone():
+    # 19:30 Tashkent == 17:30 Istanbul; only the displayed time/label change.
+    tash = format_reminder_message(LECTURE, TZ)
+    ist = format_reminder_message(LECTURE, ISTANBUL)
+    assert "19:30" in tash and "GMT+5" in tash
+    assert "17:30" in ist and "GMT+3" in ist
+
+
+def test_consult_nudge_fires_at_10am_local_per_zone():
+    event = {"type": "consult", "event_date": "2026-05-14", "event_time": None, "week_start": None}
+    tash = compute_reminder_dt(event, TZ)
+    ist = compute_reminder_dt(event, ISTANBUL)
+    # Both are 10:00 wall-clock in their own zone...
+    assert tash.hour == 10 and ist.hour == 10
+    # ...but the GMT+3 user's 10:00 is a later absolute instant than GMT+5's.
+    assert ist > tash

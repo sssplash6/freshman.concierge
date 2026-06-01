@@ -27,9 +27,16 @@ async def init_db() -> None:
             CREATE TABLE IF NOT EXISTS staff (
                 chat_id           INTEGER PRIMARY KEY,
                 telegram_username TEXT,
-                display_name      TEXT NOT NULL
+                display_name      TEXT NOT NULL,
+                timezone          TEXT
             )
         """)
+        # Lightweight migration: add `timezone` to staff tables created before
+        # this column existed. Ignore the error if it's already present.
+        try:
+            await db.execute("ALTER TABLE staff ADD COLUMN timezone TEXT")
+        except aiosqlite.OperationalError:
+            pass
         await db.execute("""
             CREATE TABLE IF NOT EXISTS reminders_log (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -121,6 +128,15 @@ async def upsert_staff(chat_id: int, username: str | None, display_name: str) ->
                 display_name = excluded.display_name
             """,
             (chat_id, username, display_name),
+        )
+        await db.commit()
+
+
+async def set_staff_timezone(chat_id: int, tz_name: str) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE staff SET timezone = ? WHERE chat_id = ?",
+            (tz_name, chat_id),
         )
         await db.commit()
 
