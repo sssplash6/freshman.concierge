@@ -48,8 +48,8 @@ def parse_date_string(value: str | None, year: int = 2026) -> str | None:
     m = re.match(r"^(\d{4}-\d{2}-\d{2})", value)
     if m:
         return m.group(1)
-    # M/D/YYYY or MM/DD/YYYY: "5/1/2026"
-    m = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})$", value)
+    # M/D/YYYY or MM/DD/YYYY, optionally with trailing text: "5/1/2026", "6/2/2026 (Test)"
+    m = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})(?!\d)", value)
     if m:
         try:
             return date(int(m.group(3)), int(m.group(1)), int(m.group(2))).isoformat()
