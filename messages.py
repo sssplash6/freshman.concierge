@@ -162,6 +162,12 @@ TASK_CHECKIN = (
     "Did you complete this task?"
 )
 
+# --- Broadcast ------------------------------------------------------------
+BROADCAST_PROMPT = "📢 Type the message to broadcast to everyone:"
+BROADCAST_PREVIEW = "📢 Preview — this will be sent to {count} registered user(s):"
+BROADCAST_SENT = "✅ Broadcast sent to {sent} of {total} user(s)."
+BROADCAST_CANCELLED = "OK, broadcast cancelled. Nothing was sent."
+
 FALLBACK = "Tap 📅 My Schedule to see your upcoming sessions, or send /start to register."
 
 SYNC_STATUS_NONE = "No sync has been run yet."

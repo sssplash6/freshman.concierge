@@ -31,7 +31,7 @@ ADMIN_KEYBOARD = ReplyKeyboardMarkup(
         [KeyboardButton("📅 My Schedule"), KeyboardButton("🔗 Set Link")],
         [KeyboardButton("🔄 Reload"),      KeyboardButton("📊 Sync Status")],
         [KeyboardButton("📣 Remind"),      KeyboardButton("📝 Assign Task")],
-        [KeyboardButton("🌍 Timezone")],
+        [KeyboardButton("📢 Broadcast"),   KeyboardButton("🌍 Timezone")],
     ],
     resize_keyboard=True,
     is_persistent=True,
@@ -74,6 +74,8 @@ TASK_PERSON   = 0     # states for task_conv
 TASK_DESC     = 1
 TASK_DEADLINE = 2
 TZ_TYPE       = 0     # state for timezone_conv
+BROADCAST_MSG     = 0  # states for broadcast_conv
+BROADCAST_CONFIRM = 1
 
 logger = logging.getLogger(__name__)
 
@@ -693,6 +695,70 @@ async def cb_task_no(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return AWAITING_REASON
 
 
+async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if not update.effective_user or not update.message:
+        return ConversationHandler.END
+    if update.effective_user.id not in REMIND_IDS and update.effective_user.id != ADMIN_CHAT_ID:
+        await update.message.reply_text(msg.ADMIN_ONLY)
+        return ConversationHandler.END
+    await update.message.reply_text(msg.BROADCAST_PROMPT)
+    return BROADCAST_MSG
+
+
+async def cb_broadcast_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if not update.message:
+        return BROADCAST_MSG
+    text = update.message.text.strip()
+    if not text:
+        await update.message.reply_text(msg.BROADCAST_PROMPT)
+        return BROADCAST_MSG
+
+    context.user_data["broadcast_text"] = text
+    count = len(await db.get_all_staff())
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton(f"📢 Send to {count}", callback_data="bcast:send"),
+        InlineKeyboardButton("✖ Cancel",            callback_data="bcast:cancel"),
+    ]])
+    await update.message.reply_text(msg.BROADCAST_PREVIEW.format(count=count))
+    await update.message.reply_text(text, reply_markup=keyboard)
+    return BROADCAST_CONFIRM
+
+
+async def cb_broadcast_send(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if not query:
+        return ConversationHandler.END
+    await query.answer()
+
+    text = context.user_data.pop("broadcast_text", None)
+    if not text:
+        await query.edit_message_reply_markup(reply_markup=None)
+        return ConversationHandler.END
+
+    staff_list = await db.get_all_staff()
+    sent = 0
+    for s in staff_list:
+        try:
+            await context.bot.send_message(chat_id=s["chat_id"], text=text)
+            sent += 1
+        except Exception:
+            logger.warning("Failed to broadcast to chat %d", s["chat_id"])
+
+    await query.edit_message_reply_markup(reply_markup=None)
+    await query.message.reply_text(msg.BROADCAST_SENT.format(sent=sent, total=len(staff_list)))
+    return ConversationHandler.END
+
+
+async def cb_broadcast_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if query:
+        await query.answer()
+        await query.edit_message_reply_markup(reply_markup=None)
+        await query.message.reply_text(msg.BROADCAST_CANCELLED)
+    context.user_data.pop("broadcast_text", None)
+    return ConversationHandler.END
+
+
 async def handle_fallback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.message:
         await update.message.reply_text(msg.FALLBACK)
@@ -1027,6 +1093,23 @@ def build_app() -> Application:
         per_message=False,
     )
 
+    broadcast_conv = ConversationHandler(
+        entry_points=[
+            CommandHandler("broadcast", cmd_broadcast),
+            MessageHandler(filters.Text(["📢 Broadcast"]), cmd_broadcast),
+        ],
+        states={
+            BROADCAST_MSG:     [MessageHandler(filters.TEXT & ~filters.COMMAND, cb_broadcast_text)],
+            BROADCAST_CONFIRM: [
+                CallbackQueryHandler(cb_broadcast_send,   pattern=r"^bcast:send$"),
+                CallbackQueryHandler(cb_broadcast_cancel, pattern=r"^bcast:cancel$"),
+            ],
+        },
+        fallbacks=[CallbackQueryHandler(cb_broadcast_cancel, pattern=r"^bcast:cancel$")],
+        per_chat=True,
+        per_message=False,
+    )
+
     timezone_conv = ConversationHandler(
         entry_points=[
             CommandHandler("start", cmd_start),
@@ -1073,6 +1156,7 @@ def build_app() -> Application:
     app.add_handler(completion_conv)
     app.add_handler(remind_conv)
     app.add_handler(task_conv)
+    app.add_handler(broadcast_conv)
     app.add_handler(timezone_conv)
     app.add_handler(CallbackQueryHandler(cb_completion_yes, pattern=r"^cc:yes:"))
     app.add_handler(CallbackQueryHandler(cb_task_yes, pattern=r"^tc:yes:"))
