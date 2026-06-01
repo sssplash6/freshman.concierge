@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Concierge Bot — Full Functionality Reference</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2a2d3e;
+      --accent: #5b8dee;
+      --accent-soft: rgba(91, 141, 238, 0.12);
+      --text: #e2e4f0;
+      --muted: #7a7e9a;
+      --green: #3ecf8e;
+      --yellow: #f0c060;
+      --red: #f47068;
+      --code-bg: #12141e;
+      --radius: 8px;
+      --font: 'Inter', system-ui, -apple-system, sans-serif;
+      --mono: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 15px;
+      line-height: 1.7;
+      display: flex;
+      min-height: 100vh;
+    }
+
+    /* ── Sidebar ── */
+    nav {
+      width: 240px;
+      min-width: 240px;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      padding: 32px 0;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+
+    nav .nav-title {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      padding: 0 20px 16px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 12px;
+    }
+
+    nav a {
+      display: block;
+      padding: 6px 20px;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 13.5px;
+      border-left: 2px solid transparent;
+      transition: color 0.15s, border-color 0.15s, background 0.15s;
+    }
+
+    nav a:hover {
+      color: var(--text);
+      background: var(--accent-soft);
+      border-left-color: var(--accent);
+    }
+
+    nav a.section {
+      font-weight: 600;
+      color: var(--text);
+      font-size: 13px;
+      margin-top: 8px;
+    }
+
+    nav a.sub {
+      padding-left: 32px;
+      font-size: 13px;
+    }
+
+    /* ── Main content ── */
+    main {
+      flex: 1;
+      max-width: 860px;
+      padding: 56px 64px;
+    }
+
+    h1 {
+      font-size: 28px;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: -0.02em;
+      margin-bottom: 8px;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      font-size: 14px;
+      margin-bottom: 40px;
+    }
+
+    .subtitle span {
+      background: var(--accent-soft);
+      color: var(--accent);
+      border: 1px solid rgba(91,141,238,0.25);
+      border-radius: 4px;
+      padding: 1px 7px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-right: 6px;
+    }
+
+    hr.divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 40px 0;
+    }
+
+    section { margin-bottom: 48px; }
+
+    h2 {
+      font-size: 20px;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 20px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    h2 .icon {
+      font-size: 18px;
+      opacity: 0.8;
+    }
+
+    h3 {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text);
+      margin: 24px 0 8px;
+    }
+
+    p { margin-bottom: 12px; color: #c8cbdf; }
+
+    code {
+      font-family: var(--mono);
+      font-size: 12.5px;
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 1px 6px;
+      color: #c9d1e8;
+    }
+
+    /* ── Command cards ── */
+    .cmd {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      margin-bottom: 12px;
+    }
+
+    .cmd-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+
+    .cmd-name {
+      font-family: var(--mono);
+      font-size: 13.5px;
+      font-weight: 600;
+      background: var(--accent-soft);
+      color: var(--accent);
+      border: 1px solid rgba(91,141,238,0.25);
+      border-radius: 5px;
+      padding: 2px 10px;
+    }
+
+    .cmd-alias {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .cmd p { margin-bottom: 6px; }
+
+    .cmd ol, .cmd ul {
+      padding-left: 20px;
+      color: #c8cbdf;
+      margin-top: 6px;
+    }
+
+    .cmd li { margin-bottom: 4px; font-size: 14px; }
+
+    /* ── Reminder cards ── */
+    .reminder-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .reminder-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px 18px;
+    }
+
+    .reminder-card h4 {
+      font-size: 13.5px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 6px;
+    }
+
+    .reminder-card p {
+      font-size: 13px;
+      margin-bottom: 0;
+    }
+
+    .tag {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 700;
+      border-radius: 4px;
+      padding: 1px 7px;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .tag-blue { background: var(--accent-soft); color: var(--accent); border: 1px solid rgba(91,141,238,0.25); }
+    .tag-green { background: rgba(62,207,142,0.1); color: var(--green); border: 1px solid rgba(62,207,142,0.25); }
+    .tag-yellow { background: rgba(240,192,96,0.1); color: var(--yellow); border: 1px solid rgba(240,192,96,0.25); }
+    .tag-red { background: rgba(244,112,104,0.1); color: var(--red); border: 1px solid rgba(244,112,104,0.25); }
+
+    /* ── Tables ── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13.5px;
+      margin-top: 8px;
+    }
+
+    thead tr {
+      background: #12141e;
+      border-bottom: 1px solid var(--border);
+    }
+
+    th {
+      text-align: left;
+      padding: 10px 14px;
+      font-size: 11.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+
+    td {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      color: #c8cbdf;
+      vertical-align: top;
+    }
+
+    tr:last-child td { border-bottom: none; }
+    tbody tr:hover { background: rgba(255,255,255,0.02); }
+
+    td code { font-size: 12px; }
+
+    .required {
+      color: var(--red);
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .optional {
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .table-wrap {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      margin-top: 12px;
+    }
+
+    /* ── Info box ── */
+    .info-box {
+      background: var(--accent-soft);
+      border: 1px solid rgba(91,141,238,0.25);
+      border-radius: var(--radius);
+      padding: 14px 18px;
+      font-size: 13.5px;
+      color: #b8c8f0;
+      margin-bottom: 20px;
+    }
+
+    .info-box strong { color: var(--accent); }
+  </style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<nav>
+  <div class="nav-title">Concierge Bot</div>
+  <a href="#overview" class="section">Overview</a>
+  <a href="#registration" class="section">Registration</a>
+  <a href="#staff" class="section">Staff Commands</a>
+  <a href="#scheduler" class="section">Auto Reminders</a>
+  <a href="#scheduler" class="sub">Lecture</a>
+  <a href="#scheduler" class="sub">Consultation</a>
+  <a href="#scheduler" class="sub">Weekly Tasks</a>
+  <a href="#scheduler" class="sub">Completion Checks</a>
+  <a href="#seminars" class="sub">Fixed Seminars</a>
+  <a href="#monday" class="sub">Monday Post</a>
+  <a href="#autosync" class="sub">Auto-sync</a>
+  <a href="#admin" class="section">Admin Commands</a>
+  <a href="#storage" class="section">Data Storage</a>
+  <a href="#sheets" class="section">Google Sheets</a>
+  <a href="#config" class="section">Configuration</a>
+</nav>
+
+<!-- Main -->
+<main>
+  <h1>Concierge Bot</h1>
+  <p class="subtitle">
+    <span>Full Reference</span>
+    Automated reminders, schedule syncing, and completion tracking for the AP team.
+  </p>
+
+  <!-- Overview -->
+  <section id="overview">
+    <h2><span class="icon">📋</span> Overview</h2>
+    <p>Telegram bot for the AP team. It reads the schedule from Google Sheets and automatically reminds staff (coaches, instructors) about their upcoming lectures, consultations, and weekly tasks. It also collects completion confirmations and logs them back to Google Sheets for analytics.</p>
+    <div class="info-box"><strong>Timezone:</strong> All times are GMT+5 (Asia/Tashkent).</div>
+  </section>
+
+  <hr class="divider" />
+
+  <!-- Registration -->
+  <section id="registration">
+    <h2><span class="icon">👤</span> Registration</h2>
+
+    <div class="cmd">
+      <div class="cmd-header">
+        <span class="cmd-name">/start</span>
+      </div>
+      <p>Staff member registers with the bot. The bot checks the sender's Telegram ID against <code>STAFF_IDS</code> in <code>config.py</code>. If the ID is on the roster, the user is saved to the DB and receives a persistent keyboard. Admins get an extended keyboard with additional buttons. Unknown IDs are rejected.</p>
+    </div>
+
+    <div class="cmd">
+      <div class="cmd-header">
+        <span class="cmd-name">/cancel</span>
+      </div>
+      <p>Unregisters the user — removes them from the DB and stops all future reminders. They can re-register with <code>/start</code>.</p>
+    </div>
+  </section>
+
+  <hr class="divider" />
+
+  <!-- Staff Commands -->
+  <section id="staff">
+    <h2><span class="icon">🛠️</span> Staff Commands</h2>
+
+    <div class="cmd">
+      <div class="cmd-header">
+        <span class="cmd-name">📅 My Schedule</span>
+        <span class="cmd-alias">/ /upcoming</span>
+      </div>
+      <p>Shows the next 5 upcoming sessions for the logged-in staff member. Displays event type (lecture or consultation), cohort, date, time, and duration. For week-based consultations (no fixed date), shows the week start date.</p>
+    </div>
+
+    <div class="cmd">
+      <div class="cmd-header">
+        <span class="cmd-name">🔗 Set Link</span>
+        <span class="cmd-alias">/ /setlink</span>
+      </div>
+      <p>Lets a staff member save their personal consultation link for a specific cohort.</p>
+      <ol>
+        <li>Bot shows cohort buttons (only cohorts where the user has consultation events).</li>
+        <li>User picks a cohort.</li>
+        <li>User sends their link (URL).</li>
+        <li>Link is saved to the DB and used in the Monday group chat post.</li>
+      </ol>
+    </div>
+  </section>
+
+  <hr class="divider" />
+
+  <!-- Scheduler -->
+  <section id="scheduler">
+    <h2><span class="icon">⏰</span> Automated Reminders</h2>
+    <p>All scheduled jobs run in the background via APScheduler.</p>
+
+    <div class="reminder-grid">
+      <div class="reminder-card">
+        <div class="tag tag-blue">Lecture</div>
+        <h4>Lecture Reminders</h4>
+        <p>Fires <strong>1 hour before</strong> a lecture's scheduled time. Sent individually to the staff member's private chat. Deduplication via <code>reminders_log</code>.</p>
+      </div>
+
+      <div class="reminder-card">
+        <div class="tag tag-green">Consultation</div>
+        <h4>Date-specific Consultations</h4>
+        <p>Fires at <strong>10:00 AM on the day</strong> of the consultation. Sent to the staff member's private chat.</p>
+      </div>
+
+      <div class="reminder-card">
+        <div class="tag tag-green">Consultation</div>
+        <h4>Week-based Consultations</h4>
+        <p>Fires at <strong>10:00 AM on Monday</strong> of the consultation week. Sent to the staff member's private chat.</p>
+      </div>
+
+      <div class="reminder-card">
+        <div class="tag tag-yellow">Weekly Task</div>
+        <h4>Weekly Task Reminders</h4>
+        <p>Fires daily at <strong>10:00 AM</strong> for tasks with a week assignment but no specific date. Repeats every day until staff member taps <strong>✅ Done</strong>. Completion is logged to DB and Google Sheets.</p>
+      </div>
+    </div>
+
+    <h3>Completion Check-ins</h3>
+    <div class="cmd">
+      <p>Fires <strong>2 hours after</strong> any timed event (lectures and date-specific consultations). Asks: "Did you complete this session?"</p>
+      <ul>
+        <li><strong>Yes</strong> → logged as completed in DB and Google Sheets.</li>
+        <li><strong>No</strong> → bot asks for a brief reason, then logs it as not completed with the reason.</li>
+      </ul>
+      <p style="margin-top:10px; font-size:13px; color: var(--muted);">Each check-in is only sent once per event per user.</p>
+    </div>
+  </section>
+
+  <!-- Fixed Seminars -->
+  <section id="seminars">
+    <h2><span class="icon">📅</span> Fixed Seminar Schedule</h2>
+    <p>Hard-coded weekly reminders for seminars with a fixed recurring schedule (no Google Sheets entry needed).</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Staff</th>
+            <th>Cohort</th>
+            <th>Day</th>
+            <th>Time (GMT+5)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Gulrukh</td><td>April Offline</td><td>Wednesday</td><td>6:30 PM</td></tr>
+          <tr><td>Rustam</td><td>April Online</td><td>Wednesday</td><td>7:30 PM</td></tr>
+          <tr><td>Gulrukh</td><td>May Offline</td><td>Saturday</td><td>3:00 PM</td></tr>
+          <tr><td>Rustam</td><td>May Online</td><td>Thursday</td><td>7:30 PM</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Monday Post -->
+  <section id="monday">
+    <h2><span class="icon">📣</span> Monday Consultation Link Post</h2>
+    <p>Every <strong>Monday at 9:00 AM</strong>, the bot posts each staff member's saved consultation link to the relevant cohort group chat. Only posts for staff who have an active consultation scheduled for that week and have saved a link.</p>
+  </section>
+
+  <!-- Auto-sync -->
+  <section id="autosync">
+    <h2><span class="icon">🔄</span> Auto-sync</h2>
+    <p>Automatically re-fetches the Google Sheets schedule every N hours. Configured via the <code>SYNC_INTERVAL_HOURS</code> env var (default: <strong>6 hours</strong>). Replaces all events in the DB on each sync.</p>
+  </section>
+
+  <hr class="divider" />
+
+  <!-- Admin Commands -->
+  <section id="admin">
+    <h2><span class="icon">🔐</span> Admin Commands</h2>
+    <div class="info-box">Admin access is granted to users whose Telegram ID is in <strong>REMIND_IDS</strong> (the "Sega" entries in <code>STAFF_IDS</code>) or matches the <strong>ADMIN_CHAT_ID</strong> env var.</div>
+
+    <div class="cmd">
+      <div class="cmd-header">
+        <span class="cmd-name">🔄 Reload</span>
+        <span class="cmd-alias">/ /reload</span>
+      </div>
+      <p>Manually triggers a Google Sheets sync.</p>
+      <ul>
+        <li><strong>No changes:</strong> confirms with event count.</li>
+        <li><strong>Changes detected:</strong> shows buttons for each affected staff member. Admin can tap each name to notify individually, use <strong>📣 Notify All</strong>, or <strong>❌ Skip</strong>.</li>
+      </ul>
+      <p style="margin-top:8px; font-size:13px;">Notification tells the staff member their schedule was updated and to check <code>/upcoming</code>.</p>
+    </div>
+
+    <div class="cmd">
+      <div class="cmd-header">
+        <span class="cmd-name">📊 Sync Status</span>
+        <span class="cmd-alias">/ /sync_status</span>
+      </div>
+      <p>Shows the timestamp and event count of the last successful sync.</p>
+    </div>
+
+    <div class="cmd">
+      <div class="cmd-header">
+        <span class="cmd-name">📣 Remind</span>
+        <span class="cmd-alias">/ /remind</span>
+      </div>
+      <p>Manually sends a reminder to any staff member for any of their upcoming events.</p>
+      <ol>
+        <li>Pick a staff member from a button list.</li>
+        <li>Pick an event from a numbered list.</li>
+        <li>Bot sends the reminder to that person's chat immediately.</li>
+      </ol>
+    </div>
+
+    <div class="cmd">
+      <div class="cmd-header">
+        <span class="cmd-name">/setgroup</span>
+      </div>
+      <p>Assigns a Telegram group chat ID to a cohort.</p>
+      <ol>
+        <li>Bot shows all cohorts in the current schedule as buttons.</li>
+        <li>Admin picks a cohort.</li>
+        <li>Admin sends the group chat ID (a negative integer, e.g. <code>-1001234567890</code>).</li>
+        <li>Saved to DB — used by the Monday consultation link post.</li>
+      </ol>
+      <p style="margin-top:8px; font-size:13px; color: var(--muted);">Group chat IDs set here override anything from the <code>COHORT_GROUP_CHATS</code> env var. The env var is only used to seed initial values on first run.</p>
+    </div>
+
+    <div class="cmd">
+      <div class="cmd-header">
+        <span class="cmd-name">/listgroups</span>
+      </div>
+      <p>Shows all currently configured cohort → group chat ID mappings.</p>
+    </div>
+  </section>
+
+  <hr class="divider" />
+
+  <!-- Data Storage -->
+  <section id="storage">
+    <h2><span class="icon">🗄️</span> Data Storage</h2>
+    <p>All data is stored in SQLite (path configured via <code>DB_PATH</code> env var, default <code>/tmp/concierge_bot.db</code>).</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Table</th>
+            <th>Purpose</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>events</code></td><td>Full schedule synced from Google Sheets</td></tr>
+          <tr><td><code>staff</code></td><td>Registered users (chat ID, username, display name)</td></tr>
+          <tr><td><code>reminders_log</code></td><td>Which reminders have been sent (deduplication)</td></tr>
+          <tr><td><code>completion_prompts_sent</code></td><td>Which completion check-ins have been sent</td></tr>
+          <tr><td><code>completions_log</code></td><td>All completion responses (yes/no + reason)</td></tr>
+          <tr><td><code>weekly_completions</code></td><td>Which weekly tasks are marked done per user per week</td></tr>
+          <tr><td><code>weekly_reminders_sent</code></td><td>Daily deduplication for weekly task reminders</td></tr>
+          <tr><td><code>consult_links</code></td><td>Staff consultation links per cohort</td></tr>
+          <tr><td><code>cohort_group_chats</code></td><td>Cohort → Telegram group chat ID mapping</td></tr>
+          <tr><td><code>sync_log</code></td><td>History of sheet syncs (timestamp + event count)</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <hr class="divider" />
+
+  <!-- Google Sheets -->
+  <section id="sheets">
+    <h2><span class="icon">📊</span> Google Sheets Integration</h2>
+    <ul style="padding-left:20px; color:#c8cbdf;">
+      <li style="margin-bottom:8px;">Schedule is read from a Google Sheet via a service account.</li>
+      <li style="margin-bottom:8px;">Parsed by <code>sheets_parser.py</code> — extracts lectures, consultations, and weekly tasks per staff member and cohort.</li>
+      <li>Completion data is appended to an analytics tab in the same sheet via <code>append_completion_row</code>.</li>
+    </ul>
+  </section>
+
+  <hr class="divider" />
+
+  <!-- Config -->
+  <section id="config">
+    <h2><span class="icon">⚙️</span> Configuration</h2>
+    <p>All configuration is done via environment variables.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Variable</th>
+            <th>Required</th>
+            <th>Description</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>TELEGRAM_BOT_TOKEN</code></td>
+            <td><span class="required">Yes</span></td>
+            <td>Bot token from BotFather</td>
+          </tr>
+          <tr>
+            <td><code>ADMIN_CHAT_ID</code></td>
+            <td><span class="required">Yes</span></td>
+            <td>Telegram ID of the primary admin</td>
+          </tr>
+          <tr>
+            <td><code>GOOGLE_SHEETS_ID</code></td>
+            <td><span class="required">Yes</span></td>
+            <td>ID of the Google Sheet</td>
+          </tr>
+          <tr>
+            <td><code>GOOGLE_SERVICE_ACCOUNT_JSON</code></td>
+            <td><span class="required">Yes</span></td>
+            <td>Full JSON of the service account key</td>
+          </tr>
+          <tr>
+            <td><code>DB_PATH</code></td>
+            <td><span class="optional">No</span></td>
+            <td>SQLite file path (default: <code>/tmp/concierge_bot.db</code>)</td>
+          </tr>
+          <tr>
+            <td><code>SYNC_INTERVAL_HOURS</code></td>
+            <td><span class="optional">No</span></td>
+            <td>Auto-sync frequency in hours (default: <code>6</code>)</td>
+          </tr>
+          <tr>
+            <td><code>COHORT_GROUP_CHATS</code></td>
+            <td><span class="optional">No</span></td>
+            <td>JSON map of cohort name → group chat ID for initial seeding</td>
+          </tr>
+          <tr>
+            <td><code>TIMEZONE</code></td>
+            <td><span class="optional">No</span></td>
+            <td>Timezone for scheduler (default: <code>Asia/Tashkent</code>)</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+</body>
+</html>
