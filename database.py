@@ -107,6 +107,21 @@ async def init_db() -> None:
                 chat_id INTEGER NOT NULL
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS tasks (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                staff_name       TEXT NOT NULL,
+                description      TEXT NOT NULL,
+                deadline         TEXT NOT NULL,
+                assigned_by      TEXT,
+                created_at       TEXT NOT NULL,
+                predeadline_sent INTEGER NOT NULL DEFAULT 0,
+                checkin_sent     INTEGER NOT NULL DEFAULT 0,
+                completed        INTEGER,
+                reason           TEXT,
+                answered_at      TEXT
+            )
+        """)
         # Seed from env var only for cohorts not already in DB
         from config import COHORT_GROUP_CHATS as _env_chats
         for cohort, chat_id in _env_chats.items():
@@ -430,6 +445,54 @@ async def get_all_cohorts() -> list[str]:
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute("SELECT DISTINCT cohort FROM events ORDER BY cohort")
         return [r[0] for r in await cursor.fetchall()]
+
+
+async def create_task(staff_name: str, description: str, deadline: str, assigned_by: str) -> int:
+    created_at = datetime.now(timezone.utc).isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """
+            INSERT INTO tasks (staff_name, description, deadline, assigned_by, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (staff_name, description, deadline, assigned_by, created_at),
+        )
+        await db.commit()
+        return cursor.lastrowid
+
+
+async def get_pending_tasks() -> list[dict]:
+    """Tasks not yet answered (completed IS NULL)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT * FROM tasks WHERE completed IS NULL")
+        return [dict(r) for r in await cursor.fetchall()]
+
+
+async def get_task(task_id: int) -> dict | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT * FROM tasks WHERE id = ?", (task_id,))
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+
+async def mark_task_flag(task_id: int, field: str) -> None:
+    """Set a notification flag (predeadline_sent or checkin_sent) to 1."""
+    assert field in ("predeadline_sent", "checkin_sent")
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(f"UPDATE tasks SET {field} = 1 WHERE id = ?", (task_id,))
+        await db.commit()
+
+
+async def set_task_result(task_id: int, completed: bool, reason: str | None = None) -> None:
+    answered_at = datetime.now(timezone.utc).isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE tasks SET completed = ?, reason = ?, answered_at = ? WHERE id = ?",
+            (int(completed), reason, answered_at, task_id),
+        )
+        await db.commit()
 
 
 async def get_last_sync() -> dict | None:

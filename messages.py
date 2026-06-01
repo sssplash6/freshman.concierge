@@ -123,6 +123,34 @@ SETGROUP_LIST_HEADER = "🏘 <b>Configured group chats</b>\n\n"
 SETGROUP_LIST_ROW = "• <b>{cohort}</b>: <code>{chat_id}</code>\n"
 SETGROUP_LIST_NONE = "No group chats configured yet."
 
+# --- Custom tasks ---------------------------------------------------------
+TASK_CHOOSE_PERSON = "👤 Choose who to assign a task to:"
+TASK_ENTER_DESC = "📝 Type the task for <b>{name}</b>:"
+TASK_CHOOSE_DEADLINE = "⏰ Choose a deadline:"
+TASK_ASSIGNED = "✅ Task assigned to <b>{name}</b>.\n<blockquote>📝 {desc}\n⏰ Due {deadline}</blockquote>"
+TASK_NO_TARGET = (
+    "⚠️ <b>{name}</b> hasn't started the bot yet, so I can't notify them now. "
+    "The task is saved and they'll get the deadline reminders once they do."
+)
+
+TASK_NEW = (
+    "📋 <b>New task assigned</b>\n"
+    "<blockquote>📝 {desc}\n"
+    "⏰ Due {deadline}\n"
+    "👤 by {by}</blockquote>"
+)
+TASK_PREDEADLINE = (
+    "⏰ <b>Task due soon</b>\n"
+    "<blockquote>📝 {desc}\n"
+    "⏰ Due {deadline}</blockquote>"
+)
+TASK_CHECKIN = (
+    "⏱ <b>Task check-in</b>\n"
+    "<blockquote>📝 {desc}\n"
+    "⏰ Due {deadline}</blockquote>\n\n"
+    "Did you complete this task?"
+)
+
 FALLBACK = "Tap 📅 My Schedule to see your upcoming sessions, or send /start to register."
 
 SYNC_STATUS_NONE = "No sync has been run yet."

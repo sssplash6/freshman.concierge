@@ -28,6 +28,7 @@ STAFF_IDS: dict[int, str] = {
     8384175592: "Sanjar",
     7926199790: "Valera",
     5012452972: "Sega",
+    8836861446: "Sega",  # Sega's primary account — full admin via REMIND_IDS
     7185151344: "Rustam",
     907955385:  "Nigel",
     1378248439: "Lyusyena",

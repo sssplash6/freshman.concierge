@@ -2,7 +2,7 @@
 import html
 import logging
 import os
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 _e = html.escape
@@ -284,6 +284,59 @@ async def send_completion_checks(bot: Bot) -> None:
                 logger.error("Failed to send completion check to %d: %s", staff["chat_id"], e)
 
 
+def format_task_deadline(deadline_iso: str, tz: pytz.BaseTzInfo) -> str:
+    """Render a stored UTC deadline in the recipient's zone, e.g. 'Fri, Jun 5 · 18:00 GMT+5'."""
+    dt = datetime.fromisoformat(deadline_iso).astimezone(tz)
+    return f"{dt.strftime('%a, %b %-d')} · {dt.strftime('%H:%M')} {tz_label(dt)}"
+
+
+async def check_task_deadlines(bot: Bot) -> None:
+    """Send the pre-deadline reminder (~2h before) and the deadline check-in for custom tasks."""
+    now = datetime.now(timezone.utc)
+    tasks = await db.get_pending_tasks()
+    staff_list = await db.get_all_staff()
+
+    for task in tasks:
+        deadline = datetime.fromisoformat(task["deadline"])
+        recipients = [s for s in staff_list if s["display_name"] == task["staff_name"]]
+
+        # Pre-deadline reminder: once, within the final 2 hours before the deadline.
+        if not task["predeadline_sent"]:
+            if now >= deadline:
+                # Deadline already passed before we could remind — skip straight to check-in.
+                await db.mark_task_flag(task["id"], "predeadline_sent")
+            elif now >= deadline - timedelta(hours=2):
+                for s in recipients:
+                    text = msg.TASK_PREDEADLINE.format(
+                        desc=_e(task["description"]),
+                        deadline=format_task_deadline(task["deadline"], staff_tz(s)),
+                    )
+                    try:
+                        await bot.send_message(chat_id=s["chat_id"], text=text, parse_mode="HTML")
+                    except TelegramError as e:
+                        logger.error("Failed to send task pre-deadline to %d: %s", s["chat_id"], e)
+                await db.mark_task_flag(task["id"], "predeadline_sent")
+
+        # Deadline check-in: once, at or after the deadline.
+        if not task["checkin_sent"] and now >= deadline:
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("✅ Yes", callback_data=f"tc:yes:{task['id']}"),
+                InlineKeyboardButton("❌ No",  callback_data=f"tc:no:{task['id']}"),
+            ]])
+            for s in recipients:
+                text = msg.TASK_CHECKIN.format(
+                    desc=_e(task["description"]),
+                    deadline=format_task_deadline(task["deadline"], staff_tz(s)),
+                )
+                try:
+                    await bot.send_message(
+                        chat_id=s["chat_id"], text=text, parse_mode="HTML", reply_markup=keyboard
+                    )
+                except TelegramError as e:
+                    logger.error("Failed to send task check-in to %d: %s", s["chat_id"], e)
+            await db.mark_task_flag(task["id"], "checkin_sent")
+
+
 async def send_weekly_consult_links(bot: Bot) -> None:
     """Every Monday: post each staff member's consultation link to the relevant group chat."""
     today = datetime.now(TZ).date()
@@ -371,6 +424,14 @@ async def init_scheduler(bot: Bot) -> None:
         seconds=60,
         kwargs={"bot": bot},
         id="completion_check",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        check_task_deadlines,
+        trigger="interval",
+        seconds=60,
+        kwargs={"bot": bot},
+        id="task_deadlines",
         replace_existing=True,
     )
     scheduler.add_job(

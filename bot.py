@@ -2,7 +2,7 @@
 import asyncio
 import html
 import logging
-from datetime import date
+from datetime import date, timedelta
 
 _e = html.escape
 
@@ -29,7 +29,7 @@ ADMIN_KEYBOARD = ReplyKeyboardMarkup(
     [
         [KeyboardButton("📅 My Schedule"), KeyboardButton("🔗 Set Link")],
         [KeyboardButton("🔄 Reload"),      KeyboardButton("📊 Sync Status")],
-        [KeyboardButton("📣 Remind")],
+        [KeyboardButton("📣 Remind"),      KeyboardButton("📝 Assign Task")],
     ],
     resize_keyboard=True,
     is_persistent=True,
@@ -42,7 +42,14 @@ import database as db
 import messages as msg
 from config import ADMIN_CHAT_ID, REMIND_IDS, STAFF_IDS, TELEGRAM_BOT_TOKEN
 from datetime import datetime as _dt, timezone as _tz
-from scheduler import format_reminder_message, staff_tz, event_instant, tz_label
+from scheduler import (
+    format_reminder_message,
+    staff_tz,
+    event_instant,
+    tz_label,
+    format_task_deadline,
+    SOURCE_TZ,
+)
 from sheets_parser import append_completion_row
 
 _tf = TimezoneFinder()
@@ -59,6 +66,9 @@ SETLINK_COHORT = 0    # states for setlink_conv
 SETLINK_URL    = 1
 SETGROUP_COHORT = 0   # states for setgroup_conv
 SETGROUP_ID     = 1
+TASK_PERSON   = 0     # states for task_conv
+TASK_DESC     = 1
+TASK_DEADLINE = 2
 
 logger = logging.getLogger(__name__)
 
@@ -446,6 +456,179 @@ async def cmd_listgroups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await update.message.reply_text("".join(lines), parse_mode="HTML")
 
 
+def _deadline_presets() -> list[tuple[str, str, object]]:
+    """Ordered (key, button label, aware datetime in team zone) deadline options."""
+    now = _dt.now(SOURCE_TZ)
+
+    def at18(d: date):
+        return SOURCE_TZ.localize(_dt(d.year, d.month, d.day, 18, 0))
+
+    return [
+        ("2h",    "⏰ In 2 hours",     now + timedelta(hours=2)),
+        ("today", "🌇 Today 6 PM",     at18(now.date())),
+        ("tom",   "🌅 Tomorrow 6 PM",  at18((now + timedelta(days=1)).date())),
+        ("d3",    "📅 In 3 days",      at18((now + timedelta(days=3)).date())),
+        ("w1",    "🗓 In 1 week",      at18((now + timedelta(days=7)).date())),
+    ]
+
+
+async def cmd_task(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if not update.effective_user or not update.message:
+        return ConversationHandler.END
+    if update.effective_user.id not in REMIND_IDS and update.effective_user.id != ADMIN_CHAT_ID:
+        await update.message.reply_text(msg.ADMIN_ONLY)
+        return ConversationHandler.END
+
+    names = sorted(set(STAFF_IDS.values()))
+    keyboard = [[InlineKeyboardButton(name, callback_data=f"tp:{name}")] for name in names]
+    keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="tx")])
+    await update.message.reply_text(
+        msg.TASK_CHOOSE_PERSON, reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    return TASK_PERSON
+
+
+async def cb_task_person(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if not query:
+        return ConversationHandler.END
+    await query.answer()
+    name = query.data[3:]
+    context.user_data["task_name"] = name
+    await query.edit_message_text(msg.TASK_ENTER_DESC.format(name=_e(name)), parse_mode="HTML")
+    return TASK_DESC
+
+
+async def cb_task_desc(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if not update.message:
+        return TASK_DESC
+    context.user_data["task_desc"] = update.message.text.strip()
+    keyboard = [[InlineKeyboardButton(label, callback_data=f"td:{key}")]
+                for key, label, _ in _deadline_presets()]
+    keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="tx")])
+    await update.message.reply_text(
+        msg.TASK_CHOOSE_DEADLINE, reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    return TASK_DEADLINE
+
+
+async def cb_task_deadline(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if not query:
+        return ConversationHandler.END
+    await query.answer()
+
+    key = query.data[3:]
+    name = context.user_data.pop("task_name", None)
+    desc = context.user_data.pop("task_desc", None)
+    if not name or not desc:
+        await query.edit_message_text("Task setup expired. Please start again.")
+        return ConversationHandler.END
+
+    chosen = next((dt for k, _, dt in _deadline_presets() if k == key), None)
+    if chosen is None:
+        await query.edit_message_text("Unknown deadline. Please start again.")
+        return ConversationHandler.END
+
+    deadline_iso = chosen.astimezone(_tz.utc).isoformat()
+    assigned_by = STAFF_IDS.get(query.from_user.id, "Admin")
+    task_id = await db.create_task(name, desc, deadline_iso, assigned_by)
+
+    # Notify the recipient(s) immediately.
+    targets = [s for s in await db.get_all_staff() if s["display_name"] == name]
+    for s in targets:
+        try:
+            await context.bot.send_message(
+                chat_id=s["chat_id"],
+                text=msg.TASK_NEW.format(
+                    desc=_e(desc),
+                    deadline=format_task_deadline(deadline_iso, staff_tz(s)),
+                    by=_e(assigned_by),
+                ),
+                parse_mode="HTML",
+            )
+        except Exception:
+            logger.warning("Failed to send new-task notice to chat %d", s["chat_id"])
+
+    deadline_label = format_task_deadline(deadline_iso, SOURCE_TZ)
+    await query.edit_message_text(
+        msg.TASK_ASSIGNED.format(name=_e(name), desc=_e(desc), deadline=deadline_label),
+        parse_mode="HTML",
+    )
+    if not targets:
+        await query.message.reply_text(msg.TASK_NO_TARGET.format(name=_e(name)), parse_mode="HTML")
+    logger.info("Task %d assigned to %s by %s, due %s", task_id, name, assigned_by, deadline_iso)
+    return ConversationHandler.END
+
+
+async def cb_task_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if query:
+        await query.answer()
+        await query.edit_message_text("Cancelled.")
+    context.user_data.pop("task_name", None)
+    context.user_data.pop("task_desc", None)
+    return ConversationHandler.END
+
+
+def _task_completion_row(task: dict, completed: bool, reason: str) -> list:
+    return [
+        _dt.now(_tz.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        task["staff_name"], "Custom Task",
+        task["description"], "—",
+        format_task_deadline(task["deadline"], SOURCE_TZ),
+        "Yes" if completed else "No", reason,
+    ]
+
+
+async def cb_task_yes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+
+    task_id = int(query.data[7:])  # strip "tc:yes:"
+    task = await db.get_task(task_id)
+    if task:
+        await db.set_task_result(task_id, True)
+        await db.log_completion(
+            type="custom_task",
+            staff_name=task["staff_name"],
+            chat_id=query.from_user.id,
+            title=task["description"],
+            cohort="—",
+            event_ref=task["deadline"],
+            completed=True,
+        )
+        asyncio.create_task(asyncio.to_thread(append_completion_row, _task_completion_row(task, True, "")))
+
+    await query.edit_message_text(msg.COMPLETION_YES_ACK)
+
+
+async def cb_task_no(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if not query:
+        return ConversationHandler.END
+    await query.answer()
+
+    task_id = int(query.data[6:])  # strip "tc:no:"
+    task = await db.get_task(task_id)
+    if not task:
+        await query.edit_message_text("Task no longer found.")
+        return ConversationHandler.END
+
+    context.user_data["pending_completion"] = {
+        "kind": "task",
+        "task_id": task_id,
+        "staff_name": task["staff_name"],
+        "description": task["description"],
+        "deadline": task["deadline"],
+        "chat_id": query.from_user.id,
+    }
+    await query.edit_message_text(msg.COMPLETION_NO_PROMPT)
+    return AWAITING_REASON
+
+
 async def handle_fallback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.message:
         await update.message.reply_text(msg.FALLBACK)
@@ -571,6 +754,28 @@ async def cb_completion_reason(update: Update, context: ContextTypes.DEFAULT_TYP
         return ConversationHandler.END
 
     reason = update.message.text.strip()
+
+    if pending.get("kind") == "task":
+        await db.set_task_result(pending["task_id"], False, reason)
+        await db.log_completion(
+            type="custom_task",
+            staff_name=pending["staff_name"],
+            chat_id=pending["chat_id"],
+            title=pending["description"],
+            cohort="—",
+            event_ref=pending["deadline"],
+            completed=False,
+            reason=reason,
+        )
+        task = {
+            "staff_name": pending["staff_name"],
+            "description": pending["description"],
+            "deadline": pending["deadline"],
+        }
+        asyncio.create_task(asyncio.to_thread(append_completion_row, _task_completion_row(task, False, reason)))
+        await update.message.reply_text(msg.COMPLETION_NO_ACK)
+        return ConversationHandler.END
+
     await db.log_completion(
         type="event",
         staff_name=pending["staff_name"],
@@ -731,11 +936,29 @@ def build_app() -> Application:
     )
 
     completion_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(cb_completion_no, pattern=r"^cc:no:")],
+        entry_points=[
+            CallbackQueryHandler(cb_completion_no, pattern=r"^cc:no:"),
+            CallbackQueryHandler(cb_task_no, pattern=r"^tc:no:"),
+        ],
         states={
             AWAITING_REASON: [MessageHandler(filters.TEXT & ~filters.COMMAND, cb_completion_reason)],
         },
         fallbacks=[],
+        per_chat=True,
+        per_message=False,
+    )
+
+    task_conv = ConversationHandler(
+        entry_points=[
+            CommandHandler("task", cmd_task),
+            MessageHandler(filters.Text(["📝 Assign Task"]), cmd_task),
+        ],
+        states={
+            TASK_PERSON:   [CallbackQueryHandler(cb_task_person, pattern=r"^tp:")],
+            TASK_DESC:     [MessageHandler(filters.TEXT & ~filters.COMMAND, cb_task_desc)],
+            TASK_DEADLINE: [CallbackQueryHandler(cb_task_deadline, pattern=r"^td:")],
+        },
+        fallbacks=[CallbackQueryHandler(cb_task_cancel, pattern=r"^tx$")],
         per_chat=True,
         per_message=False,
     )
@@ -768,7 +991,9 @@ def build_app() -> Application:
     app.add_handler(setgroup_conv)
     app.add_handler(completion_conv)
     app.add_handler(remind_conv)
+    app.add_handler(task_conv)
     app.add_handler(CallbackQueryHandler(cb_completion_yes, pattern=r"^cc:yes:"))
+    app.add_handler(CallbackQueryHandler(cb_task_yes, pattern=r"^tc:yes:"))
     app.add_handler(CallbackQueryHandler(cb_weekly_complete, pattern=r"^wc:"))
     app.add_handler(CallbackQueryHandler(cb_reload_affected, pattern=r"^ra:"))
     app.add_handler(CallbackQueryHandler(cb_reload_notify, pattern=r"^rn:"))
