@@ -614,6 +614,30 @@ async def cmd_reload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await update.message.reply_text(msg.RELOAD_FAILED)
 
 
+async def cmd_testlog(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_user or not update.message:
+        return
+    if update.effective_user.id not in REMIND_IDS and update.effective_user.id != ADMIN_CHAT_ID:
+        await update.message.reply_text(msg.ADMIN_ONLY)
+        return
+
+    staff = await db.get_staff(update.effective_user.id)
+    name = staff["display_name"] if staff else "TEST"
+    row = [
+        _dt.now(_tz.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        name, "Test Log",
+        "Spreadsheet logging test", "—", date.today().isoformat(), "Yes", "",
+    ]
+
+    await update.message.reply_text("⏳ Writing test row to the completions sheet…")
+    try:
+        await asyncio.to_thread(append_completion_row, row)
+        await update.message.reply_text("✅ Test row written. Check the completions sheet.")
+    except Exception as exc:
+        logger.exception("Test log write failed")
+        await update.message.reply_text(f"❌ Logging failed: {_e(type(exc).__name__)}: {_e(str(exc))}")
+
+
 async def cmd_sync_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message:
         return
@@ -701,6 +725,7 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("sync_status", cmd_sync_status))
     app.add_handler(MessageHandler(filters.Text(["📊 Sync Status"]), cmd_sync_status))
     app.add_handler(CommandHandler("listgroups", cmd_listgroups))
+    app.add_handler(CommandHandler("testlog", cmd_testlog))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_fallback))
     app.add_error_handler(_handle_error)
 
