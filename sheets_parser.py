@@ -221,6 +221,9 @@ _COMPLETIONS_HEADERS = ["Timestamp", "Staff Name", "Type", "Title", "Cohort", "D
 _LOG = "Completions Log"
 _DASH = "Dashboard"
 
+_HW_LOG = "HW Checks Log"
+_HW_HEADERS = ["Timestamp", "TA Name", "Cohort", "Event Title", "Event Date", "Completed", "Reason"]
+
 
 def _rgb(r: float, g: float, b: float) -> dict:
     return {"red": r, "green": g, "blue": b}
@@ -466,6 +469,117 @@ def append_completion_row(row: list) -> None:
 
     if row_idx:
         _format_log_row(ws, row_idx, completed=(row[6] == "Yes"))
+
+
+def _setup_hw_log_sheet(ws) -> None:
+    sid = ws.id
+    sh = ws.spreadsheet
+    # Column widths: Timestamp, TA Name, Cohort, Event Title, Event Date, Completed, Reason
+    col_widths = [175, 120, 130, 220, 110, 100, 290]
+    requests = [
+        {
+            "repeatCell": {
+                "range": {"sheetId": sid, "startRowIndex": 0, "endRowIndex": 1,
+                          "startColumnIndex": 0, "endColumnIndex": 7},
+                "cell": {"userEnteredFormat": {
+                    "backgroundColor": _rgb(0.129, 0.196, 0.341),
+                    "textFormat": {"bold": True, "fontSize": 11,
+                                   "foregroundColor": _rgb(1, 1, 1)},
+                    "horizontalAlignment": "CENTER",
+                    "verticalAlignment": "MIDDLE",
+                }},
+                "fields": "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment)",
+            }
+        },
+        {
+            "updateSheetProperties": {
+                "properties": {"sheetId": sid,
+                               "gridProperties": {"frozenRowCount": 1}},
+                "fields": "gridProperties.frozenRowCount",
+            }
+        },
+        {
+            "updateDimensionProperties": {
+                "range": {"sheetId": sid, "dimension": "ROWS",
+                          "startIndex": 0, "endIndex": 1},
+                "properties": {"pixelSize": 36},
+                "fields": "pixelSize",
+            }
+        },
+    ]
+    for i, w in enumerate(col_widths):
+        requests.append({
+            "updateDimensionProperties": {
+                "range": {"sheetId": sid, "dimension": "COLUMNS",
+                          "startIndex": i, "endIndex": i + 1},
+                "properties": {"pixelSize": w},
+                "fields": "pixelSize",
+            }
+        })
+    sh.batch_update({"requests": requests})
+
+
+def _format_hw_row(ws, row_idx: int, completed: bool) -> None:
+    sid = ws.id
+    i = row_idx - 1
+    row_bg = _rgb(0.851, 0.957, 0.851) if completed else _rgb(0.988, 0.894, 0.882)
+    badge_bg = _rgb(0.204, 0.659, 0.325) if completed else _rgb(0.820, 0.165, 0.118)
+    ws.spreadsheet.batch_update({"requests": [
+        {
+            "repeatCell": {
+                "range": {"sheetId": sid, "startRowIndex": i, "endRowIndex": i + 1,
+                          "startColumnIndex": 0, "endColumnIndex": 7},
+                "cell": {"userEnteredFormat": {
+                    "backgroundColor": row_bg,
+                    "verticalAlignment": "MIDDLE",
+                }},
+                "fields": "userEnteredFormat(backgroundColor,verticalAlignment)",
+            }
+        },
+        # "Yes"/"No" badge — column F (index 5)
+        {
+            "repeatCell": {
+                "range": {"sheetId": sid, "startRowIndex": i, "endRowIndex": i + 1,
+                          "startColumnIndex": 5, "endColumnIndex": 6},
+                "cell": {"userEnteredFormat": {
+                    "backgroundColor": badge_bg,
+                    "textFormat": {"bold": True, "foregroundColor": _rgb(1, 1, 1)},
+                    "horizontalAlignment": "CENTER",
+                }},
+                "fields": "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)",
+            }
+        },
+    ]})
+
+
+def append_hw_check_row(row: list) -> None:
+    """Append a HW check result row to the 'HW Checks Log' sheet tab."""
+    import gspread
+    from google.oauth2.service_account import Credentials
+    from config import GOOGLE_SERVICE_ACCOUNT_JSON, COMPLETIONS_SHEETS_ID
+
+    creds = Credentials.from_service_account_info(GOOGLE_SERVICE_ACCOUNT_JSON, scopes=_SCOPES)
+    gc = gspread.Client(auth=creds)
+    sh = gc.open_by_key(COMPLETIONS_SHEETS_ID)
+
+    is_new = False
+    try:
+        ws = sh.worksheet(_HW_LOG)
+    except gspread.exceptions.WorksheetNotFound:
+        ws = sh.add_worksheet(_HW_LOG, rows=2000, cols=len(_HW_HEADERS))
+        ws.append_row(_HW_HEADERS, value_input_option="USER_ENTERED")
+        is_new = True
+
+    result = ws.append_row(row, value_input_option="USER_ENTERED")
+    updated = result.get("updates", {}).get("updatedRange", "")
+    m = _re.search(r"[A-Z](\d+):", updated)
+    row_idx = int(m.group(1)) if m else None
+
+    if is_new:
+        _setup_hw_log_sheet(ws)
+
+    if row_idx:
+        _format_hw_row(ws, row_idx, completed=(row[5] == "Yes"))
 
 
 def fetch_all_events() -> list[dict]:

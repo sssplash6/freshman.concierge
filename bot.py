@@ -53,7 +53,7 @@ from scheduler import (
     tz_pretty,
     SOURCE_TZ,
 )
-from sheets_parser import append_completion_row
+from sheets_parser import append_completion_row, append_hw_check_row
 
 
 SELECT_PERSON, SELECT_EVENT = range(2)
@@ -959,6 +959,20 @@ async def cb_completion_reason(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text(msg.COMPLETION_NO_ACK)
         return ConversationHandler.END
 
+    if pending.get("kind") == "hw_check":
+        await db.log_hw_completion(
+            pending["ta_name"], pending["chat_id"],
+            pending["cohort"], str(pending["event_id"]), False,
+        )
+        row = [
+            _dt.now(_tz.utc).strftime("%Y-%m-%d %H:%M UTC"),
+            pending["ta_name"], pending["cohort"],
+            pending["title"], pending["event_date"], "No", reason,
+        ]
+        asyncio.create_task(asyncio.to_thread(append_hw_check_row, row))
+        await update.message.reply_text(msg.HW_CHECK_NO_ACK)
+        return ConversationHandler.END
+
     await db.log_completion(
         type="event",
         staff_name=pending["staff_name"],
@@ -1182,21 +1196,38 @@ async def cb_hw_yes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         staff = await db.get_staff(query.from_user.id)
         ta_name = staff["display_name"] if staff else "unknown"
         await db.log_hw_completion(ta_name, query.from_user.id, event["cohort"], str(event_id), True)
+        row = [
+            _dt.now(_tz.utc).strftime("%Y-%m-%d %H:%M UTC"),
+            ta_name, event["cohort"], event["title"],
+            event.get("event_date", ""), "Yes", "",
+        ]
+        asyncio.create_task(asyncio.to_thread(append_hw_check_row, row))
     await query.edit_message_text(msg.HW_CHECK_YES_ACK)
 
 
-async def cb_hw_no(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def cb_hw_no(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     if not query:
-        return
+        return ConversationHandler.END
     await query.answer()
     event_id = int(query.data[6:])  # strip "hw:no:"
     event = await db.get_event_by_id(event_id)
-    if event:
-        staff = await db.get_staff(query.from_user.id)
-        ta_name = staff["display_name"] if staff else "unknown"
-        await db.log_hw_completion(ta_name, query.from_user.id, event["cohort"], str(event_id), False)
-    await query.edit_message_text(msg.HW_CHECK_NO_ACK)
+    if not event:
+        await query.edit_message_text("HW check no longer found.")
+        return ConversationHandler.END
+    staff = await db.get_staff(query.from_user.id)
+    ta_name = staff["display_name"] if staff else "unknown"
+    context.user_data["pending_completion"] = {
+        "kind": "hw_check",
+        "event_id": event_id,
+        "ta_name": ta_name,
+        "chat_id": query.from_user.id,
+        "cohort": event["cohort"],
+        "title": event["title"],
+        "event_date": event.get("event_date", ""),
+    }
+    await query.edit_message_text(msg.HW_CHECK_NO_PROMPT)
+    return AWAITING_REASON
 
 
 def build_app() -> Application:
@@ -1219,7 +1250,8 @@ def build_app() -> Application:
     completion_conv = ConversationHandler(
         entry_points=[
             CallbackQueryHandler(cb_completion_no, pattern=r"^cc:no:"),
-            CallbackQueryHandler(cb_task_no, pattern=r"^tc:no:"),
+            CallbackQueryHandler(cb_task_no,       pattern=r"^tc:no:"),
+            CallbackQueryHandler(cb_hw_no,         pattern=r"^hw:no:"),
         ],
         states={
             AWAITING_REASON: [MessageHandler(filters.TEXT & ~filters.COMMAND, cb_completion_reason)],
@@ -1328,7 +1360,6 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_completion_yes, pattern=r"^cc:yes:"))
     app.add_handler(CallbackQueryHandler(cb_task_yes, pattern=r"^tc:yes:"))
     app.add_handler(CallbackQueryHandler(cb_hw_yes, pattern=r"^hw:yes:"))
-    app.add_handler(CallbackQueryHandler(cb_hw_no,  pattern=r"^hw:no:"))
     app.add_handler(CallbackQueryHandler(cb_tz_confirm, pattern=r"^tzset:"))
     app.add_handler(CallbackQueryHandler(cb_tz_cancel, pattern=r"^tzcancel$"))
     app.add_handler(CallbackQueryHandler(cb_weekly_complete, pattern=r"^wc:"))

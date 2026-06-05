@@ -185,4 +185,5 @@ HW_CHECK = (
     "Did you finish checking homeworks for <b>{cohort}</b> — <b>{title}</b> ({date})?"
 )
 HW_CHECK_YES_ACK = "✅ Noted, homeworks checked!"
-HW_CHECK_NO_ACK = "📋 Noted. Don't forget to check them soon."
+HW_CHECK_NO_PROMPT = "Got it. Why weren't the homeworks checked? Please type a brief reason."
+HW_CHECK_NO_ACK = "📋 Noted. Reason logged — don't forget to follow up."
