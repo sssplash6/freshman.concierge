@@ -70,9 +70,10 @@ SETLINK_COHORT = 0    # states for setlink_conv
 SETLINK_URL    = 1
 SETGROUP_COHORT = 0   # states for setgroup_conv
 SETGROUP_ID     = 1
-TASK_PERSON   = 0     # states for task_conv
-TASK_DESC     = 1
-TASK_DEADLINE = 2
+TASK_PERSON      = 0     # states for task_conv
+TASK_DESC        = 1
+TASK_DEADLINE    = 2
+TASK_CUSTOM_DATE = 3
 TZ_TYPE       = 0     # state for timezone_conv
 BROADCAST_MSG     = 0  # states for broadcast_conv
 BROADCAST_CONFIRM = 1
@@ -571,6 +572,7 @@ async def cb_task_desc(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     context.user_data["task_desc"] = update.message.text.strip()
     keyboard = [[InlineKeyboardButton(label, callback_data=f"td:{key}")]
                 for key, label, _ in _deadline_presets()]
+    keyboard.append([InlineKeyboardButton("📆 Custom date", callback_data="td:custom")])
     keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="tx")])
     await update.message.reply_text(
         msg.TASK_CHOOSE_DEADLINE, reply_markup=InlineKeyboardMarkup(keyboard)
@@ -590,6 +592,15 @@ async def cb_task_deadline(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if not name or not desc:
         await query.edit_message_text("Task setup expired. Please start again.")
         return ConversationHandler.END
+
+    if key == "custom":
+        context.user_data["task_name"] = name
+        context.user_data["task_desc"] = desc
+        await query.edit_message_text(
+            "📆 Enter a custom deadline date (e.g. <code>6/15</code>, <code>6/15 3pm</code>, or <code>June 15</code>):",
+            parse_mode="HTML",
+        )
+        return TASK_CUSTOM_DATE
 
     chosen = next((dt for k, _, dt in _deadline_presets() if k == key), None)
     if chosen is None:
@@ -624,6 +635,64 @@ async def cb_task_deadline(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if not targets:
         await query.message.reply_text(msg.TASK_NO_TARGET.format(name=_e(name)), parse_mode="HTML")
     logger.info("Task %d assigned to %s by %s, due %s", task_id, name, assigned_by, deadline_iso)
+    return ConversationHandler.END
+
+
+async def cb_task_custom_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if not update.message:
+        return TASK_CUSTOM_DATE
+    text = update.message.text.strip()
+    name = context.user_data.pop("task_name", None)
+    desc = context.user_data.pop("task_desc", None)
+    if not name or not desc:
+        await update.message.reply_text("Task setup expired. Please start again.")
+        return ConversationHandler.END
+
+    # Try to parse the typed date using dateutil; default to 6 PM team time.
+    try:
+        from dateutil import parser as _du_parser
+        now = _dt.now(SOURCE_TZ)
+        parsed = _du_parser.parse(text, default=_dt(now.year, now.month, now.day, 18, 0))
+        # If no time was specified, set to 6 PM.
+        if parsed.hour == 0 and parsed.minute == 0 and ":" not in text and "am" not in text.lower() and "pm" not in text.lower():
+            parsed = parsed.replace(hour=18, minute=0)
+        deadline_dt = SOURCE_TZ.localize(parsed.replace(tzinfo=None))
+    except Exception:
+        await update.message.reply_text(
+            "❌ Couldn't parse that date. Try a format like <code>6/15</code>, <code>6/15 3pm</code>, or <code>June 15</code>.",
+            parse_mode="HTML",
+        )
+        context.user_data["task_name"] = name
+        context.user_data["task_desc"] = desc
+        return TASK_CUSTOM_DATE
+
+    deadline_iso = deadline_dt.astimezone(_tz.utc).isoformat()
+    assigned_by = STAFF_IDS.get(update.effective_user.id, "Admin")
+    task_id = await db.create_task(name, desc, deadline_iso, assigned_by)
+
+    targets = [s for s in await db.get_all_staff() if s["display_name"] == name]
+    for s in targets:
+        try:
+            await context.bot.send_message(
+                chat_id=s["chat_id"],
+                text=msg.TASK_NEW.format(
+                    desc=_e(desc),
+                    deadline=format_task_deadline(deadline_iso, staff_tz(s)),
+                    by=_e(assigned_by),
+                ),
+                parse_mode="HTML",
+            )
+        except Exception:
+            logger.warning("Failed to send new-task notice to chat %d", s["chat_id"])
+
+    deadline_label = format_task_deadline(deadline_iso, SOURCE_TZ)
+    await update.message.reply_text(
+        msg.TASK_ASSIGNED.format(name=_e(name), desc=_e(desc), deadline=deadline_label),
+        parse_mode="HTML",
+    )
+    if not targets:
+        await update.message.reply_text(msg.TASK_NO_TARGET.format(name=_e(name)), parse_mode="HTML")
+    logger.info("Task %d assigned to %s by %s, due %s (custom)", task_id, name, assigned_by, deadline_iso)
     return ConversationHandler.END
 
 
@@ -1084,9 +1153,10 @@ def build_app() -> Application:
             MessageHandler(filters.Text(["📝 Assign Task"]), cmd_task),
         ],
         states={
-            TASK_PERSON:   [CallbackQueryHandler(cb_task_person, pattern=r"^tp:")],
-            TASK_DESC:     [MessageHandler(filters.TEXT & ~filters.COMMAND, cb_task_desc)],
-            TASK_DEADLINE: [CallbackQueryHandler(cb_task_deadline, pattern=r"^td:")],
+            TASK_PERSON:      [CallbackQueryHandler(cb_task_person, pattern=r"^tp:")],
+            TASK_DESC:        [MessageHandler(filters.TEXT & ~filters.COMMAND, cb_task_desc)],
+            TASK_DEADLINE:    [CallbackQueryHandler(cb_task_deadline, pattern=r"^td:")],
+            TASK_CUSTOM_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, cb_task_custom_date)],
         },
         fallbacks=[CallbackQueryHandler(cb_task_cancel, pattern=r"^tx$")],
         per_chat=True,
