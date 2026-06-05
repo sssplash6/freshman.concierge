@@ -179,7 +179,8 @@ async def cmd_upcoming(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
 
     tz = staff_tz(staff)
-    lines = [msg.UPCOMING_HEADER.format(count=len(events))]
+    session_word = "session" if len(events) == 1 else "sessions"
+    lines = [msg.UPCOMING_HEADER.format(count=len(events), session_word=session_word)]
     for e in events:
         try:
             if e.get("type") == "lecture":
@@ -207,7 +208,6 @@ async def cmd_upcoming(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 d = date.fromisoformat(e["event_date"])
                 lines.append(
                     msg.UPCOMING_CONSULT_DATE.format(
-                        title=_e(e["title"]),
                         cohort=_e(e["cohort"]),
                         weekday=d.strftime("%A"),
                         date=d.strftime("%B %-d"),
@@ -218,7 +218,6 @@ async def cmd_upcoming(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 d = date.fromisoformat(e["week_start"])
                 lines.append(
                     msg.UPCOMING_CONSULT_WEEK.format(
-                        title=_e(e["title"]),
                         cohort=_e(e["cohort"]),
                         date=d.strftime("%B %-d"),
                         duration=e.get("duration_min") or "?",

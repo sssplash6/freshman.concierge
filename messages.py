@@ -37,8 +37,8 @@ NOT_REGISTERED = "You're not registered yet. Send /start to get set up."
 
 ADMIN_ONLY = "⛔ This action is admin-only."
 
-UPCOMING_HEADER = "📅 <b>Your next {count} session(s)</b>\n\n"
-UPCOMING_NONE = "No upcoming sessions found for you."
+UPCOMING_HEADER = "📅 <b>Your next {count} {session_word}</b>\n\n"
+UPCOMING_NONE = "You have no upcoming sessions on the schedule."
 
 UPCOMING_LECTURE = (
     "🎓 <b>{title}</b>\n"
@@ -47,19 +47,19 @@ UPCOMING_LECTURE = (
 )
 
 UPCOMING_CONSULT_DATE = (
-    "📋 <b>{title}</b>\n"
+    "📋 <b>Consultation</b>\n"
     "<blockquote>👥 {cohort}\n"
     "📅 {weekday}, {date} · {duration} min</blockquote>\n\n"
 )
 
 UPCOMING_CONSULT_WEEK = (
-    "📋 <b>{title}</b>\n"
+    "📋 <b>Consultation</b>\n"
     "<blockquote>👥 {cohort}\n"
     "📅 Week of {date} · {duration} min</blockquote>\n\n"
 )
 
 REMINDER_LECTURE = (
-    "🔔 <b>Lecture in 1 hour</b>\n"
+    "🔔 <b>Your lecture starts in 1 hour</b>\n"
     "<blockquote>📚 {title}\n"
     "👥 {cohort}\n"
     "📅 {weekday}, {date} · {time} {tz}</blockquote>"
@@ -78,7 +78,7 @@ REMINDER_CONSULT_WEEK = (
 )
 
 REMINDER_SEMINAR = (
-    "🔔 <b>Seminar in 1 hour</b>\n"
+    "🔔 <b>Your seminar starts in 1 hour</b>\n"
     "<blockquote>👥 {cohort}\n"
     "📅 {weekday} · {time} GMT+5</blockquote>"
 )
@@ -93,24 +93,24 @@ RELOAD_EMPTY = "⚠️ No events returned from the sheet. Existing schedule kept
 RELOAD_FAILED = "❌ Sync failed. Check the server logs for details."
 RELOAD_NOTIFY_SENT = "📣 Notified {count} staff member(s)."
 RELOAD_NOTIFY_SKIPPED = "OK, no notification sent."
-SCHEDULE_UPDATED = "📅 Your schedule was updated. Tap 📅 My Schedule to see the latest."
+SCHEDULE_UPDATED = "🗓 Your schedule has been updated. Tap 📅 My Schedule to see the latest."
 
 WEEKLY_TASK_REMINDER = (
-    "📋 <b>Weekly task</b>\n"
+    "📋 <b>Weekly task reminder</b>\n"
     "<blockquote>👥 {cohort}\n"
     "📝 {title}\n"
-    "📅 Week of {date}</blockquote>"
+    "📅 Week of {date}</blockquote>\n\n"
+    "Tap <b>Done</b> below once you've completed this."
 )
 
 COMPLETION_CHECK = (
-    "⏱ <b>Session check-in</b>\n"
+    "✅ <b>Did you complete this session?</b>\n"
     "<blockquote>{icon} {title}\n"
     "👥 {cohort}\n"
-    "📅 {date}</blockquote>\n\n"
-    "Did you complete this session?"
+    "📅 {date}</blockquote>"
 )
-COMPLETION_YES_ACK = "✅ Got it, logged as completed. Thanks!"
-COMPLETION_NO_PROMPT = "📝 Got it — what happened? Send a short reason."
+COMPLETION_YES_ACK = "✅ Logged as completed. Thanks!"
+COMPLETION_NO_PROMPT = "📝 What happened? Send a short reason."
 COMPLETION_NO_ACK = "📝 Noted. Thanks for the update."
 
 CANCELLED = "Cancelled."
@@ -165,10 +165,9 @@ TASK_PREDEADLINE = (
     "⏰ Due {deadline}</blockquote>"
 )
 TASK_CHECKIN = (
-    "⏱ <b>Task check-in</b>\n"
+    "✅ <b>Did you complete this task?</b>\n"
     "<blockquote>📝 {desc}\n"
-    "⏰ Due {deadline}</blockquote>\n\n"
-    "Did you complete this task?"
+    "⏰ Due {deadline}</blockquote>"
 )
 
 # --- Broadcast ------------------------------------------------------------
