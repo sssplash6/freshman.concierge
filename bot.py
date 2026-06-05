@@ -294,10 +294,8 @@ async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         return ConversationHandler.END
 
     names = sorted(set(STAFF_IDS.values()))
-    keyboard: list[list[InlineKeyboardButton]] = [
-        [InlineKeyboardButton(name, callback_data=f"rp:{name}")]
-        for name in names
-    ]
+    btns = [InlineKeyboardButton(name, callback_data=f"rp:{name}") for name in names]
+    keyboard: list[list[InlineKeyboardButton]] = [btns[i:i+2] for i in range(0, len(btns), 2)]
     keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="rc")])
 
     await update.message.reply_text(
@@ -547,7 +545,8 @@ async def cmd_task(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         return ConversationHandler.END
 
     names = sorted(set(STAFF_IDS.values()))
-    keyboard = [[InlineKeyboardButton(name, callback_data=f"tp:{name}")] for name in names]
+    btns = [InlineKeyboardButton(name, callback_data=f"tp:{name}") for name in names]
+    keyboard = [btns[i:i+2] for i in range(0, len(btns), 2)]
     keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="tx")])
     await update.message.reply_text(
         msg.TASK_CHOOSE_PERSON, reply_markup=InlineKeyboardMarkup(keyboard)
@@ -1172,7 +1171,8 @@ async def cb_assign_ta_cohort(update: Update, context: ContextTypes.DEFAULT_TYPE
     current = await db.get_ta_assignment(cohort)
     current_txt = f" (currently: {_e(current)})" if current else ""
     from config import TA_NAMES
-    keyboard = [[InlineKeyboardButton(name, callback_data=f"tan:{name}")] for name in TA_NAMES]
+    btns = [InlineKeyboardButton(name, callback_data=f"tan:{name}") for name in TA_NAMES]
+    keyboard = [btns[i:i+2] for i in range(0, len(btns), 2)]
     keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="tacx")])
     await query.edit_message_text(
         msg.ASSIGN_TA_CHOOSE_NAME.format(cohort=_e(cohort), current=current_txt),
