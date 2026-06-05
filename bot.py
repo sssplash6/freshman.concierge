@@ -187,11 +187,11 @@ async def cmd_upcoming(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 inst = event_instant(e)
                 if inst:
                     local = inst.astimezone(tz)
-                    weekday, datestr = local.strftime("%A"), local.strftime("%B %-d")
+                    weekday, datestr = local.strftime("%a"), local.strftime("%b %-d")
                     timestr, label = local.strftime("%H:%M"), tz_label(local)
                 else:
                     d = date.fromisoformat(e["event_date"])
-                    weekday, datestr = d.strftime("%A"), d.strftime("%B %-d")
+                    weekday, datestr = d.strftime("%a"), d.strftime("%b %-d")
                     timestr = "TBD"
                     label = tz_label(tz.localize(_dt(d.year, d.month, d.day)))
                 lines.append(
@@ -209,8 +209,8 @@ async def cmd_upcoming(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 lines.append(
                     msg.UPCOMING_CONSULT_DATE.format(
                         cohort=_e(e["cohort"]),
-                        weekday=d.strftime("%A"),
-                        date=d.strftime("%B %-d"),
+                        weekday=d.strftime("%a"),
+                        date=d.strftime("%b %-d"),
                         duration=e.get("duration_min") or "?",
                     )
                 )
@@ -219,7 +219,7 @@ async def cmd_upcoming(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 lines.append(
                     msg.UPCOMING_CONSULT_WEEK.format(
                         cohort=_e(e["cohort"]),
-                        date=d.strftime("%B %-d"),
+                        date=d.strftime("%b %-d"),
                         duration=e.get("duration_min") or "?",
                     )
                 )

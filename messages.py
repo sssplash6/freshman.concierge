@@ -37,25 +37,22 @@ NOT_REGISTERED = "You're not registered yet. Send /start to get set up."
 
 ADMIN_ONLY = "⛔ This action is admin-only."
 
-UPCOMING_HEADER = "📅 <b>Your next {count} {session_word}</b>\n\n"
+UPCOMING_HEADER = "<b>Your next {count} {session_word}</b>\n\n"
 UPCOMING_NONE = "You have no upcoming sessions on the schedule."
 
 UPCOMING_LECTURE = (
-    "🎓 <b>{title}</b>\n"
-    "<blockquote>👥 {cohort}\n"
-    "📅 {weekday}, {date} · {time} {tz}</blockquote>\n\n"
+    "<blockquote><b>🎓 {title}</b>\n"
+    "{cohort} · {weekday}, {date} · {time} {tz}</blockquote>\n\n"
 )
 
 UPCOMING_CONSULT_DATE = (
-    "📋 <b>Consultation</b>\n"
-    "<blockquote>👥 {cohort}\n"
-    "📅 {weekday}, {date} · {duration} min</blockquote>\n\n"
+    "<blockquote><b>📋 Consultation</b>\n"
+    "{cohort} · {weekday}, {date} · {duration} min</blockquote>\n\n"
 )
 
 UPCOMING_CONSULT_WEEK = (
-    "📋 <b>Consultation</b>\n"
-    "<blockquote>👥 {cohort}\n"
-    "📅 Week of {date} · {duration} min</blockquote>\n\n"
+    "<blockquote><b>📋 Consultation</b>\n"
+    "{cohort} · Week of {date} · {duration} min</blockquote>\n\n"
 )
 
 REMINDER_LECTURE = (
