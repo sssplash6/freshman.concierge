@@ -28,10 +28,19 @@ MAIN_KEYBOARD = ReplyKeyboardMarkup(
 
 ADMIN_KEYBOARD = ReplyKeyboardMarkup(
     [
-        [KeyboardButton("📅 My Schedule"), KeyboardButton("🔄 Reload")],
-        [KeyboardButton("📣 Remind"),      KeyboardButton("📝 Assign Task")],
-        [KeyboardButton("🔗 Set Link"),    KeyboardButton("📊 Sync Status")],
-        [KeyboardButton("🎓 Assign TA"),   KeyboardButton("📢 Broadcast"),  KeyboardButton("🌍 Timezone")],
+        [KeyboardButton("📅 My Schedule"), KeyboardButton("📣 Remind")],
+        [KeyboardButton("📝 Assign Task"), KeyboardButton("🎓 Assign TA")],
+        [KeyboardButton("📢 Broadcast"),   KeyboardButton("⚙️ Settings")],
+    ],
+    resize_keyboard=True,
+    is_persistent=True,
+)
+
+SETTINGS_KEYBOARD = ReplyKeyboardMarkup(
+    [
+        [KeyboardButton("🔄 Reload"),    KeyboardButton("📊 Sync Status")],
+        [KeyboardButton("🔗 Set Link"),  KeyboardButton("🌍 Timezone")],
+        [KeyboardButton("← Back")],
     ],
     resize_keyboard=True,
     is_persistent=True,
@@ -230,6 +239,21 @@ async def cmd_upcoming(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_user or not update.message:
+        return
+    await update.message.reply_text(
+        "Here's your menu.",
+        reply_markup=_main_keyboard_for(update.effective_user.id),
+    )
+
+
+async def cmd_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_user or not update.message:
+        return
+    await update.message.reply_text("⚙️ Settings", reply_markup=SETTINGS_KEYBOARD)
+
+
+async def cmd_settings_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_user or not update.message:
         return
     await update.message.reply_text(
@@ -1368,6 +1392,8 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("upcoming", cmd_upcoming))
     app.add_handler(MessageHandler(filters.Text(["📅 My Schedule"]), cmd_upcoming))
     app.add_handler(CommandHandler("menu", cmd_menu))
+    app.add_handler(MessageHandler(filters.Text(["⚙️ Settings"]), cmd_settings))
+    app.add_handler(MessageHandler(filters.Text(["← Back"]),     cmd_settings_back))
     app.add_handler(CommandHandler("cancel", cmd_cancel))
     app.add_handler(CommandHandler("reload", cmd_reload))
     app.add_handler(MessageHandler(filters.Text(["🔄 Reload"]), cmd_reload))
