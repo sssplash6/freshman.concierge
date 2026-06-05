@@ -41,18 +41,18 @@ UPCOMING_HEADER = "<b>Your next {count} {session_word}</b>\n\n"
 UPCOMING_NONE = "You have no upcoming sessions on the schedule."
 
 UPCOMING_LECTURE = (
-    "<blockquote><b>🎓 {title}</b>\n"
-    "{cohort} · {weekday}, {date} · {time} {tz}</blockquote>\n\n"
+    "<b>🎓 {title}</b>\n"
+    "{cohort} · {weekday}, {date} · {time} {tz}\n\n"
 )
 
 UPCOMING_CONSULT_DATE = (
-    "<blockquote><b>📋 Consultation</b>\n"
-    "{cohort} · {weekday}, {date} · {duration} min</blockquote>\n\n"
+    "<b>📋 Consultation</b>\n"
+    "{cohort} · {weekday}, {date} · {duration} min\n\n"
 )
 
 UPCOMING_CONSULT_WEEK = (
-    "<blockquote><b>📋 Consultation</b>\n"
-    "{cohort} · Week of {date} · {duration} min</blockquote>\n\n"
+    "<b>📋 Consultation</b>\n"
+    "{cohort} · Week of {date} · {duration} min\n\n"
 )
 
 REMINDER_LECTURE = (
