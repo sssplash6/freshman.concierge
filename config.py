@@ -24,14 +24,14 @@ DB_PATH: str = os.getenv("DB_PATH", "/tmp/concierge_bot.db")
 SYNC_INTERVAL_HOURS: int = int(os.getenv("SYNC_INTERVAL_HOURS", "6"))
 TIMEZONE: str = "Asia/Tashkent"  # GMT+5
 
-# TA names available for cohort assignment. Update with real names/IDs when TAs onboard.
-TA_NAMES: list[str] = ["a", "b", "c", "d"]
-
 # TA Telegram IDs → display name. Add real IDs here so TAs can register with /start.
 TA_IDS: dict[int, str] = {
     int(uid): name
     for uid, name in json.loads(os.getenv("TA_IDS", "{}")).items()
 }
+
+# Derived from TA_IDS — names shown in the "Assign TA" dropdown.
+TA_NAMES: list[str] = list(TA_IDS.values())
 
 STAFF_IDS: dict[int, str] = {
     8384175592: "Sanjar",
