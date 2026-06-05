@@ -29,8 +29,8 @@ MAIN_KEYBOARD = ReplyKeyboardMarkup(
 ADMIN_KEYBOARD = ReplyKeyboardMarkup(
     [
         [KeyboardButton("📅 My Schedule"), KeyboardButton("📣 Remind")],
-        [KeyboardButton("📝 Assign Task"), KeyboardButton("🎓 Assign TA")],
-        [KeyboardButton("📢 Broadcast"),   KeyboardButton("⚙️ Settings")],
+        [KeyboardButton("📝 Assign Task"), KeyboardButton("📢 Broadcast")],
+        [KeyboardButton("⚙️ Settings")],
     ],
     resize_keyboard=True,
     is_persistent=True,
@@ -40,7 +40,7 @@ SETTINGS_KEYBOARD = ReplyKeyboardMarkup(
     [
         [KeyboardButton("🔄 Reload"),    KeyboardButton("📊 Sync Status")],
         [KeyboardButton("🔗 Set Link"),  KeyboardButton("🌍 Timezone")],
-        [KeyboardButton("← Back")],
+        [KeyboardButton("🎓 Assign TA"), KeyboardButton("← Back")],
     ],
     resize_keyboard=True,
     is_persistent=True,
