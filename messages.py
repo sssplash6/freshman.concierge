@@ -42,17 +42,20 @@ UPCOMING_NONE = "You have no upcoming sessions on the schedule."
 
 UPCOMING_LECTURE = (
     "<b>🎓 {title}</b>\n"
-    "{cohort} · {weekday}, {date} · {time} {tz}\n\n"
+    "<blockquote>{cohort}</blockquote>"
+    "{weekday}, {date} · {time} {tz}\n\n"
 )
 
 UPCOMING_CONSULT_DATE = (
     "<b>📋 Consultation</b>\n"
-    "{cohort} · {weekday}, {date} · {duration} min\n\n"
+    "<blockquote>{cohort}</blockquote>"
+    "{weekday}, {date} · {duration} min\n\n"
 )
 
 UPCOMING_CONSULT_WEEK = (
     "<b>📋 Consultation</b>\n"
-    "{cohort} · Week of {date} · {duration} min\n\n"
+    "<blockquote>{cohort}</blockquote>"
+    "Week of {date} · {duration} min\n\n"
 )
 
 REMINDER_LECTURE = (
