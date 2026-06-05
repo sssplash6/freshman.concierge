@@ -293,7 +293,8 @@ async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         await update.message.reply_text(msg.ADMIN_ONLY)
         return ConversationHandler.END
 
-    names = sorted(set(STAFF_IDS.values()))
+    sender = STAFF_IDS.get(update.effective_user.id)
+    names = sorted(n for n in set(STAFF_IDS.values()) if n != sender)
     btns = [InlineKeyboardButton(name, callback_data=f"rp:{name}") for name in names]
     keyboard: list[list[InlineKeyboardButton]] = [btns[i:i+2] for i in range(0, len(btns), 2)]
     keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="rc")])
