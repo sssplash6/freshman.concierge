@@ -28,9 +28,9 @@ MAIN_KEYBOARD = ReplyKeyboardMarkup(
 
 ADMIN_KEYBOARD = ReplyKeyboardMarkup(
     [
-        [KeyboardButton("📅 My Schedule"), KeyboardButton("🔗 Set Link")],
-        [KeyboardButton("🔄 Reload"),      KeyboardButton("📊 Sync Status")],
+        [KeyboardButton("📅 My Schedule"), KeyboardButton("🔄 Reload")],
         [KeyboardButton("📣 Remind"),      KeyboardButton("📝 Assign Task")],
+        [KeyboardButton("🔗 Set Link"),    KeyboardButton("📊 Sync Status")],
         [KeyboardButton("🎓 Assign TA"),   KeyboardButton("📢 Broadcast"),  KeyboardButton("🌍 Timezone")],
     ],
     resize_keyboard=True,
@@ -234,7 +234,7 @@ async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_user or not update.message:
         return
     await update.message.reply_text(
-        "Menu refreshed.",
+        "Here's your menu.",
         reply_markup=_main_keyboard_for(update.effective_user.id),
     )
 
@@ -278,7 +278,7 @@ async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="rc")])
 
     await update.message.reply_text(
-        "👤 Choose a staff member to remind:",
+        "📣 Choose a staff member to remind:",
         reply_markup=InlineKeyboardMarkup(keyboard),
     )
     return SELECT_PERSON
@@ -295,12 +295,12 @@ async def cb_remind_person(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     events = await db.get_upcoming_events_for_staff(name, limit=10)
     if not events:
-        await query.edit_message_text(f"No upcoming events found for {_e(name)}.")
+        await query.edit_message_text(f"No upcoming sessions found for {_e(name)}.")
         return ConversationHandler.END
 
     context.user_data["remind_events"] = events
 
-    lines = [f"📅 Choose an event to remind <b>{_e(name)}</b> of:\n"]
+    lines = [f"📅 Choose a session to remind <b>{_e(name)}</b> about:\n"]
     for i, e in enumerate(events, 1):
         lines.append(f"{i}. {_event_button_label(e)}")
 
@@ -328,12 +328,12 @@ async def cb_remind_event(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     event = events[idx] if 0 <= idx < len(events) else None
     if not event:
-        await query.edit_message_text("Event not found.")
+        await query.edit_message_text("Session not found.")
         return ConversationHandler.END
 
     targets = [s for s in await db.get_all_staff() if s["display_name"] == name]
     if not targets:
-        await query.edit_message_text(f"⚠️ {_e(name)} hasn't started the bot yet — no chat to send to.")
+        await query.edit_message_text(f"⚠️ {_e(name)} hasn't registered with the bot yet — can't send.")
         return ConversationHandler.END
 
     text = format_reminder_message(event, staff_tz(targets[0]))
@@ -354,7 +354,7 @@ async def cb_remind_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     query = update.callback_query
     if query:
         await query.answer()
-        await query.edit_message_text("Cancelled.")
+        await query.edit_message_text(msg.CANCELLED)
     return ConversationHandler.END
 
 
@@ -387,7 +387,7 @@ async def cb_setlink_cohort(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     await query.answer()
 
     if query.data == "sl:cancel":
-        await query.edit_message_text("Cancelled.")
+        await query.edit_message_text(msg.CANCELLED)
         return ConversationHandler.END
 
     cohort = query.data[3:]
@@ -448,7 +448,7 @@ async def cb_setgroup_cohort(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
 
     if query.data == "sg:cancel":
-        await query.edit_message_text("Cancelled.")
+        await query.edit_message_text(msg.CANCELLED)
         return ConversationHandler.END
 
     cohort = query.data[3:]
@@ -567,7 +567,7 @@ async def cb_task_deadline(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     name = context.user_data.pop("task_name", None)
     desc = context.user_data.pop("task_desc", None)
     if not name or not desc:
-        await query.edit_message_text("Task setup expired. Please start again.")
+        await query.edit_message_text("⏱ Task setup expired — please start again.")
         return ConversationHandler.END
 
     if key == "custom":
@@ -622,7 +622,7 @@ async def cb_task_custom_date(update: Update, context: ContextTypes.DEFAULT_TYPE
     name = context.user_data.pop("task_name", None)
     desc = context.user_data.pop("task_desc", None)
     if not name or not desc:
-        await update.message.reply_text("Task setup expired. Please start again.")
+        await update.message.reply_text("⏱ Task setup expired — please start again.")
         return ConversationHandler.END
 
     # Try to parse the typed date using dateutil; default to 6 PM team time.
@@ -677,7 +677,7 @@ async def cb_task_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     query = update.callback_query
     if query:
         await query.answer()
-        await query.edit_message_text("Cancelled.")
+        await query.edit_message_text(msg.CANCELLED)
     context.user_data.pop("task_name", None)
     context.user_data.pop("task_desc", None)
     return ConversationHandler.END
@@ -1111,7 +1111,8 @@ async def cmd_sync_status(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             msg.SYNC_STATUS.format(
                 synced_at=last["synced_at"],
                 event_count=last["event_count"],
-            )
+            ),
+            parse_mode="HTML",
         )
 
 
@@ -1166,7 +1167,7 @@ async def cb_assign_ta_name(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     ta_name = query.data[4:]  # strip "tan:"
     cohort = context.user_data.pop("assign_ta_cohort", None)
     if not cohort:
-        await query.edit_message_text("Assignment expired. Please start again.")
+        await query.edit_message_text("⏱ Session expired — please start again.")
         return ConversationHandler.END
     await db.set_ta_assignment(cohort, ta_name)
     await query.edit_message_text(
@@ -1180,7 +1181,7 @@ async def cb_assign_ta_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE
     query = update.callback_query
     if query:
         await query.answer()
-        await query.edit_message_text("Cancelled.")
+        await query.edit_message_text(msg.CANCELLED)
     context.user_data.pop("assign_ta_cohort", None)
     return ConversationHandler.END
 
