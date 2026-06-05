@@ -651,18 +651,24 @@ async def cb_task_custom_date(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("⏱ Task setup expired — please start again.")
         return ConversationHandler.END
 
-    # Try to parse the typed date using dateutil; default to 6 PM team time.
+    # Try to parse the typed date using dateutil.
     try:
         from dateutil import parser as _du_parser
         now = _dt.now(SOURCE_TZ)
-        parsed = _du_parser.parse(text, default=_dt(now.year, now.month, now.day, 18, 0))
-        # If no time was specified, set to 6 PM.
-        if parsed.hour == 0 and parsed.minute == 0 and ":" not in text and "am" not in text.lower() and "pm" not in text.lower():
-            parsed = parsed.replace(hour=18, minute=0)
+        # Parse with a neutral default (midnight) so we can detect whether
+        # the user supplied a time themselves.
+        neutral = _dt(now.year, now.month, now.day, 0, 0)
+        parsed = _du_parser.parse(text, default=neutral, dayfirst=False, yearfirst=False)
+        user_gave_time = ":" in text or "am" in text.lower() or "pm" in text.lower()
+        if not user_gave_time:
+            parsed = parsed.replace(hour=18, minute=0, second=0)
         deadline_dt = SOURCE_TZ.localize(parsed.replace(tzinfo=None))
+        # If the resolved deadline is already in the past, roll it to next year.
+        if deadline_dt < _dt.now(SOURCE_TZ):
+            deadline_dt = deadline_dt.replace(year=deadline_dt.year + 1)
     except Exception:
         await update.message.reply_text(
-            "❌ Couldn't parse that date. Try a format like <code>6/15</code>, <code>6/15 3pm</code>, or <code>June 15</code>.",
+            "❌ Couldn't parse that date. Try something like <code>6/15</code>, <code>June 15</code>, or <code>6/15 3pm</code>.",
             parse_mode="HTML",
         )
         context.user_data["task_name"] = name
@@ -704,6 +710,8 @@ async def cb_task_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if query:
         await query.answer()
         await query.edit_message_text(msg.CANCELLED)
+    elif update.message:
+        await update.message.reply_text(msg.CANCELLED)
     context.user_data.pop("task_name", None)
     context.user_data.pop("task_desc", None)
     return ConversationHandler.END
@@ -1351,7 +1359,11 @@ def build_app() -> Application:
             TASK_DEADLINE:    [CallbackQueryHandler(cb_task_deadline, pattern=r"^td:")],
             TASK_CUSTOM_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, cb_task_custom_date)],
         },
-        fallbacks=[CallbackQueryHandler(cb_task_cancel, pattern=r"^tx$")],
+        fallbacks=[
+            CallbackQueryHandler(cb_task_cancel, pattern=r"^tx$"),
+            CommandHandler("cancel", cb_task_cancel),
+            MessageHandler(filters.Text(["cancel", "Cancel", "❌ Cancel"]), cb_task_cancel),
+        ],
         per_chat=True,
         per_message=False,
     )
