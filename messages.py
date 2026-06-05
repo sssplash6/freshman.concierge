@@ -1,16 +1,14 @@
 # messages.py
 
 REGISTERED = (
-    "✅ You're registered as {name}. You'll receive reminders before your sessions.\n\n"
-    "One more thing — share your location so I can set your timezone and send "
-    "reminders at the right local time."
+    “✅ You're registered as {name}. You'll receive reminders before your sessions.\n\n”
+    “One more thing — type your timezone so I can send reminders at the right local time.”
 )
 
 TZ_PROMPT = (
-    "🕔 Let's set your timezone so reminders arrive at the right local time.\n\n"
-    "📱 <b>On your phone:</b> tap “📍 Share my location” below.\n"
-    "💻 <b>On desktop:</b> just type your timezone — e.g. <code>GMT+5</code>, "
-    "<code>UTC+5</code>, or an area name like <code>Asia/Tashkent</code>."
+    “🕔 Let's set your timezone so reminders arrive at the right local time.\n\n”
+    “Type your timezone — e.g. <code>GMT+5</code>, <code>UTC+5</code>, “
+    “or an area name like <code>Asia/Tashkent</code>.”
 )
 
 TZ_CONFIRM = (

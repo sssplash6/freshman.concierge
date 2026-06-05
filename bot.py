@@ -38,7 +38,6 @@ ADMIN_KEYBOARD = ReplyKeyboardMarkup(
 )
 
 import pytz
-from timezonefinder import TimezoneFinder
 
 import database as db
 import messages as msg
@@ -56,13 +55,6 @@ from scheduler import (
 )
 from sheets_parser import append_completion_row
 
-_tf = TimezoneFinder()
-
-LOCATION_KEYBOARD = ReplyKeyboardMarkup(
-    [[KeyboardButton("📍 Share my location", request_location=True)]],
-    resize_keyboard=True,
-    one_time_keyboard=True,
-)
 
 SELECT_PERSON, SELECT_EVENT = range(2)
 AWAITING_REASON = 0   # state for completion_conv
@@ -106,9 +98,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text(
         msg.REGISTERED.format(name=name), reply_markup=_main_keyboard_for(user_id)
     )
-    await update.message.reply_text(
-        msg.TZ_PROMPT, parse_mode="HTML", reply_markup=LOCATION_KEYBOARD
-    )
+    await update.message.reply_text(msg.TZ_PROMPT, parse_mode="HTML")
     return TZ_TYPE
 
 
@@ -119,32 +109,8 @@ async def cmd_timezone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     if not staff:
         await update.message.reply_text(msg.NOT_REGISTERED)
         return ConversationHandler.END
-    await update.message.reply_text(
-        msg.TZ_PROMPT, parse_mode="HTML", reply_markup=LOCATION_KEYBOARD
-    )
+    await update.message.reply_text(msg.TZ_PROMPT, parse_mode="HTML")
     return TZ_TYPE
-
-
-async def cb_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if not update.message or not update.message.location or not update.effective_user:
-        return ConversationHandler.END
-    user_id = update.effective_user.id
-    staff = await db.get_staff(user_id)
-    if not staff:
-        await update.message.reply_text(msg.NOT_REGISTERED)
-        return ConversationHandler.END
-
-    loc = update.message.location
-    tz_name = _tf.timezone_at(lat=loc.latitude, lng=loc.longitude) or "Asia/Tashkent"
-    await db.set_staff_timezone(user_id, tz_name)
-
-    now_local = _dt.now(pytz.timezone(tz_name))
-    await update.message.reply_text(
-        msg.TZ_SAVED.format(zone=_e(tz_pretty(tz_name)), time=now_local.strftime("%H:%M")),
-        parse_mode="HTML",
-        reply_markup=_main_keyboard_for(user_id),
-    )
-    return ConversationHandler.END
 
 
 async def cb_tz_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -193,7 +159,7 @@ async def cb_tz_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
     await query.answer()
     await query.edit_message_reply_markup(reply_markup=None)
-    await query.message.reply_text(msg.TZ_PROMPT, parse_mode="HTML", reply_markup=LOCATION_KEYBOARD)
+    await query.message.reply_text(msg.TZ_PROMPT, parse_mode="HTML")
 
 
 async def cmd_upcoming(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -833,6 +799,13 @@ async def handle_fallback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await update.message.reply_text(msg.FALLBACK)
 
 
+async def _cb_stale(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Catch-all for inline buttons that no longer have an active handler (e.g. after a restart)."""
+    query = update.callback_query
+    if query:
+        await query.answer("Session expired. Please start again.", show_alert=False)
+
+
 async def cb_reload_notify(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if not query:
@@ -1143,6 +1116,7 @@ def build_app() -> Application:
             AWAITING_REASON: [MessageHandler(filters.TEXT & ~filters.COMMAND, cb_completion_reason)],
         },
         fallbacks=[],
+        allow_reentry=True,
         per_chat=True,
         per_message=False,
     )
@@ -1188,7 +1162,6 @@ def build_app() -> Application:
         ],
         states={
             TZ_TYPE: [
-                MessageHandler(filters.LOCATION, cb_location),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, cb_tz_text),
             ],
         },
@@ -1235,7 +1208,6 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_weekly_complete, pattern=r"^wc:"))
     app.add_handler(CallbackQueryHandler(cb_reload_affected, pattern=r"^ra:"))
     app.add_handler(CallbackQueryHandler(cb_reload_notify, pattern=r"^rn:"))
-    app.add_handler(MessageHandler(filters.LOCATION, cb_location))
     app.add_handler(CommandHandler("upcoming", cmd_upcoming))
     app.add_handler(MessageHandler(filters.Text(["📅 My Schedule"]), cmd_upcoming))
     app.add_handler(CommandHandler("cancel", cmd_cancel))
@@ -1246,6 +1218,7 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("listgroups", cmd_listgroups))
     app.add_handler(CommandHandler("testlog", cmd_testlog))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_fallback))
+    app.add_handler(CallbackQueryHandler(_cb_stale))
     app.add_error_handler(_handle_error)
 
     return app
