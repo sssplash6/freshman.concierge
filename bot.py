@@ -40,7 +40,8 @@ SETTINGS_KEYBOARD = ReplyKeyboardMarkup(
     [
         [KeyboardButton("🔄 Reload"),    KeyboardButton("📊 Sync Status")],
         [KeyboardButton("🔗 Set Link"),  KeyboardButton("🌍 Timezone")],
-        [KeyboardButton("🎓 Assign TA"), KeyboardButton("← Back")],
+        [KeyboardButton("🎓 Assign TA"), KeyboardButton("➕ Add TA")],
+        [KeyboardButton("← Back")],
     ],
     resize_keyboard=True,
     is_persistent=True,
@@ -77,6 +78,8 @@ TASK_DEADLINE    = 2
 TASK_CUSTOM_DATE = 3
 ASSIGN_TA_COHORT = 0     # states for assign_ta_conv
 ASSIGN_TA_NAME   = 1
+ADD_TA_NAME      = 0     # states for add_ta_conv
+ADD_TA_ID        = 1
 TZ_TYPE       = 0     # state for timezone_conv
 BROADCAST_MSG     = 0  # states for broadcast_conv
 BROADCAST_CONFIRM = 1
@@ -97,7 +100,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if not update.effective_user or not update.message:
         return ConversationHandler.END
     user_id = update.effective_user.id
-    name = STAFF_IDS.get(user_id)
+    name = STAFF_IDS.get(user_id) or await db.get_ta_name_from_roster(user_id)
     if not name:
         await update.message.reply_text(msg.NOT_ON_ROSTER)
         return ConversationHandler.END
@@ -1172,7 +1175,10 @@ async def cb_assign_ta_cohort(update: Update, context: ContextTypes.DEFAULT_TYPE
     current = await db.get_ta_assignment(cohort)
     current_txt = f" (currently: {_e(current)})" if current else ""
     from config import TA_NAMES
-    btns = [InlineKeyboardButton(name, callback_data=f"tan:{name}") for name in TA_NAMES]
+    roster = await db.get_ta_roster()
+    extra = [r["display_name"] for r in roster if r["display_name"] not in TA_NAMES]
+    all_ta_names = TA_NAMES + extra
+    btns = [InlineKeyboardButton(name, callback_data=f"tan:{name}") for name in all_ta_names]
     keyboard = [btns[i:i+2] for i in range(0, len(btns), 2)]
     keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="tacx")])
     await query.edit_message_text(
@@ -1253,6 +1259,53 @@ async def cb_hw_no(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     }
     await query.edit_message_text(msg.HW_CHECK_NO_PROMPT)
     return AWAITING_REASON
+
+
+async def cmd_add_ta(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if not update.effective_user or not update.message:
+        return ConversationHandler.END
+    if update.effective_user.id not in REMIND_IDS and update.effective_user.id != ADMIN_CHAT_ID:
+        await update.message.reply_text(msg.ADMIN_ONLY)
+        return ConversationHandler.END
+    await update.message.reply_text(msg.ADD_TA_ASK_NAME)
+    return ADD_TA_NAME
+
+
+async def cb_add_ta_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if not update.message:
+        return ADD_TA_NAME
+    name = update.message.text.strip()
+    if not name:
+        await update.message.reply_text(msg.ADD_TA_ASK_NAME)
+        return ADD_TA_NAME
+    context.user_data["add_ta_name"] = name
+    await update.message.reply_text(msg.ADD_TA_ASK_ID.format(name=_e(name)), parse_mode="HTML")
+    return ADD_TA_ID
+
+
+async def cb_add_ta_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if not update.message:
+        return ADD_TA_ID
+    text = update.message.text.strip()
+    try:
+        tid = int(text)
+        if tid <= 0:
+            raise ValueError
+    except ValueError:
+        await update.message.reply_text(msg.ADD_TA_INVALID_ID, parse_mode="HTML")
+        return ADD_TA_ID
+
+    name = context.user_data.pop("add_ta_name", None)
+    if not name:
+        await update.message.reply_text("⏱ Session expired — tap ➕ Add TA to start again.")
+        return ConversationHandler.END
+
+    await db.add_ta_to_roster(tid, name)
+    await update.message.reply_text(
+        msg.ADD_TA_SAVED.format(name=_e(name), tid=tid),
+        parse_mode="HTML",
+    )
+    return ConversationHandler.END
 
 
 def build_app() -> Application:
@@ -1374,6 +1427,20 @@ def build_app() -> Application:
         per_message=False,
     )
 
+    add_ta_conv = ConversationHandler(
+        entry_points=[
+            CommandHandler("addta", cmd_add_ta),
+            MessageHandler(filters.Text(["➕ Add TA"]), cmd_add_ta),
+        ],
+        states={
+            ADD_TA_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, cb_add_ta_name)],
+            ADD_TA_ID:   [MessageHandler(filters.TEXT & ~filters.COMMAND, cb_add_ta_id)],
+        },
+        fallbacks=[],
+        per_chat=True,
+        per_message=False,
+    )
+
     app.add_handler(setlink_conv)
     app.add_handler(setgroup_conv)
     app.add_handler(completion_conv)
@@ -1382,6 +1449,7 @@ def build_app() -> Application:
     app.add_handler(broadcast_conv)
     app.add_handler(timezone_conv)
     app.add_handler(assign_ta_conv)
+    app.add_handler(add_ta_conv)
     app.add_handler(CallbackQueryHandler(cb_completion_yes, pattern=r"^cc:yes:"))
     app.add_handler(CallbackQueryHandler(cb_task_yes, pattern=r"^tc:yes:"))
     app.add_handler(CallbackQueryHandler(cb_hw_yes, pattern=r"^hw:yes:"))

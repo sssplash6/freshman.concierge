@@ -190,6 +190,15 @@ ASSIGN_TA_CHOOSE_COHORT = "🎓 Choose a cohort to assign a TA to:"
 ASSIGN_TA_CHOOSE_NAME = "🎓 Assign a TA to <b>{cohort}</b>{current}.\n\nChoose:"
 ASSIGN_TA_SAVED = "✅ <b>{ta}</b> is now the TA for <b>{cohort}</b>."
 
+# --- Add TA ---------------------------------------------------------------
+ADD_TA_ASK_NAME = "👤 What's the TA's name? (first name, e.g. Kamola)"
+ADD_TA_ASK_ID = (
+    "🆔 Got it — now send <b>{name}</b>'s Telegram ID.\n\n"
+    "<i>They can get it by messaging @userinfobot.</i>"
+)
+ADD_TA_SAVED = "✅ <b>{name}</b> (ID: <code>{tid}</code>) added as a TA."
+ADD_TA_INVALID_ID = "❌ That doesn't look like a valid Telegram ID. Send a plain number, e.g. <code>123456789</code>."
+
 # --- Homework check -------------------------------------------------------
 HW_CHECK = (
     "📚 <b>Homework check</b>\n"
