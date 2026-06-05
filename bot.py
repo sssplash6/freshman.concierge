@@ -31,7 +31,7 @@ ADMIN_KEYBOARD = ReplyKeyboardMarkup(
         [KeyboardButton("📅 My Schedule"), KeyboardButton("🔗 Set Link")],
         [KeyboardButton("🔄 Reload"),      KeyboardButton("📊 Sync Status")],
         [KeyboardButton("📣 Remind"),      KeyboardButton("📝 Assign Task")],
-        [KeyboardButton("📢 Broadcast"),   KeyboardButton("🌍 Timezone")],
+        [KeyboardButton("🎓 Assign TA"),   KeyboardButton("📢 Broadcast"),  KeyboardButton("🌍 Timezone")],
     ],
     resize_keyboard=True,
     is_persistent=True,
@@ -66,6 +66,8 @@ TASK_PERSON      = 0     # states for task_conv
 TASK_DESC        = 1
 TASK_DEADLINE    = 2
 TASK_CUSTOM_DATE = 3
+ASSIGN_TA_COHORT = 0     # states for assign_ta_conv
+ASSIGN_TA_NAME   = 1
 TZ_TYPE       = 0     # state for timezone_conv
 BROADCAST_MSG     = 0  # states for broadcast_conv
 BROADCAST_CONFIRM = 1
@@ -1090,6 +1092,104 @@ async def cmd_sync_status(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
 
 
+async def cmd_assign_ta(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if not update.effective_user or not update.message:
+        return ConversationHandler.END
+    if update.effective_user.id not in REMIND_IDS and update.effective_user.id != ADMIN_CHAT_ID:
+        await update.message.reply_text(msg.ADMIN_ONLY)
+        return ConversationHandler.END
+    cohorts = await db.get_all_cohorts()
+    if not cohorts:
+        await update.message.reply_text("No cohorts found in the schedule. Run a sync first.")
+        return ConversationHandler.END
+    ta_assignments = await db.get_all_ta_assignments()
+    keyboard = []
+    for cohort in cohorts:
+        ta = ta_assignments.get(cohort)
+        label = f"{cohort}  →  {ta}" if ta else cohort
+        keyboard.append([InlineKeyboardButton(label, callback_data=f"tac:{cohort}")])
+    keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="tacx")])
+    await update.message.reply_text(
+        msg.ASSIGN_TA_CHOOSE_COHORT, reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    return ASSIGN_TA_COHORT
+
+
+async def cb_assign_ta_cohort(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if not query:
+        return ConversationHandler.END
+    await query.answer()
+    cohort = query.data[4:]  # strip "tac:"
+    context.user_data["assign_ta_cohort"] = cohort
+    current = await db.get_ta_assignment(cohort)
+    current_txt = f" (currently: {_e(current)})" if current else ""
+    from config import TA_NAMES
+    keyboard = [[InlineKeyboardButton(name, callback_data=f"tan:{name}")] for name in TA_NAMES]
+    keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="tacx")])
+    await query.edit_message_text(
+        msg.ASSIGN_TA_CHOOSE_NAME.format(cohort=_e(cohort), current=current_txt),
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
+    return ASSIGN_TA_NAME
+
+
+async def cb_assign_ta_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if not query:
+        return ConversationHandler.END
+    await query.answer()
+    ta_name = query.data[4:]  # strip "tan:"
+    cohort = context.user_data.pop("assign_ta_cohort", None)
+    if not cohort:
+        await query.edit_message_text("Assignment expired. Please start again.")
+        return ConversationHandler.END
+    await db.set_ta_assignment(cohort, ta_name)
+    await query.edit_message_text(
+        msg.ASSIGN_TA_SAVED.format(ta=_e(ta_name), cohort=_e(cohort)),
+        parse_mode="HTML",
+    )
+    return ConversationHandler.END
+
+
+async def cb_assign_ta_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if query:
+        await query.answer()
+        await query.edit_message_text("Cancelled.")
+    context.user_data.pop("assign_ta_cohort", None)
+    return ConversationHandler.END
+
+
+async def cb_hw_yes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+    event_id = int(query.data[7:])  # strip "hw:yes:"
+    event = await db.get_event_by_id(event_id)
+    if event:
+        staff = await db.get_staff(query.from_user.id)
+        ta_name = staff["display_name"] if staff else "unknown"
+        await db.log_hw_completion(ta_name, query.from_user.id, event["cohort"], str(event_id), True)
+    await query.edit_message_text(msg.HW_CHECK_YES_ACK)
+
+
+async def cb_hw_no(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+    event_id = int(query.data[6:])  # strip "hw:no:"
+    event = await db.get_event_by_id(event_id)
+    if event:
+        staff = await db.get_staff(query.from_user.id)
+        ta_name = staff["display_name"] if staff else "unknown"
+        await db.log_hw_completion(ta_name, query.from_user.id, event["cohort"], str(event_id), False)
+    await query.edit_message_text(msg.HW_CHECK_NO_ACK)
+
+
 def build_app() -> Application:
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
@@ -1194,6 +1294,20 @@ def build_app() -> Application:
         per_message=False,
     )
 
+    assign_ta_conv = ConversationHandler(
+        entry_points=[
+            CommandHandler("assignta", cmd_assign_ta),
+            MessageHandler(filters.Text(["🎓 Assign TA"]), cmd_assign_ta),
+        ],
+        states={
+            ASSIGN_TA_COHORT: [CallbackQueryHandler(cb_assign_ta_cohort, pattern=r"^tac:")],
+            ASSIGN_TA_NAME:   [CallbackQueryHandler(cb_assign_ta_name,   pattern=r"^tan:")],
+        },
+        fallbacks=[CallbackQueryHandler(cb_assign_ta_cancel, pattern=r"^tacx$")],
+        per_chat=True,
+        per_message=False,
+    )
+
     app.add_handler(setlink_conv)
     app.add_handler(setgroup_conv)
     app.add_handler(completion_conv)
@@ -1201,8 +1315,11 @@ def build_app() -> Application:
     app.add_handler(task_conv)
     app.add_handler(broadcast_conv)
     app.add_handler(timezone_conv)
+    app.add_handler(assign_ta_conv)
     app.add_handler(CallbackQueryHandler(cb_completion_yes, pattern=r"^cc:yes:"))
     app.add_handler(CallbackQueryHandler(cb_task_yes, pattern=r"^tc:yes:"))
+    app.add_handler(CallbackQueryHandler(cb_hw_yes, pattern=r"^hw:yes:"))
+    app.add_handler(CallbackQueryHandler(cb_hw_no,  pattern=r"^hw:no:"))
     app.add_handler(CallbackQueryHandler(cb_tz_confirm, pattern=r"^tzset:"))
     app.add_handler(CallbackQueryHandler(cb_tz_cancel, pattern=r"^tzcancel$"))
     app.add_handler(CallbackQueryHandler(cb_weekly_complete, pattern=r"^wc:"))

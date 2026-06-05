@@ -386,6 +386,63 @@ async def check_task_deadlines(bot: Bot) -> None:
             await db.mark_task_flag(task["id"], "checkin_sent")
 
 
+async def check_hw_completion_checks(bot: Bot) -> None:
+    """3 days after each lecture, send the assigned TA a homework-check notification."""
+    events = await db.get_all_events()
+    ta_assignments = await db.get_all_ta_assignments()  # {cohort: ta_name}
+    staff_list = await db.get_all_staff()
+
+    for event in events:
+        if event.get("type") not in ("lecture", "seminar"):
+            continue
+        if not event.get("event_date"):
+            continue
+
+        cohort = event["cohort"]
+        ta_name = ta_assignments.get(cohort)
+        if not ta_name:
+            continue
+
+        ta_staff = next((s for s in staff_list if s["display_name"] == ta_name), None)
+        if not ta_staff:
+            continue
+
+        now_local = datetime.now(staff_tz(ta_staff))
+        if not (now_local.hour == 10 and now_local.minute < 30):
+            continue
+
+        event_date = date.fromisoformat(event["event_date"])
+        if now_local.date() != event_date + timedelta(days=3):
+            continue
+
+        if await db.hw_check_sent(event["id"], ta_staff["chat_id"]):
+            continue
+
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ Yes", callback_data=f"hw:yes:{event['id']}"),
+            InlineKeyboardButton("❌ No",  callback_data=f"hw:no:{event['id']}"),
+        ]])
+        text = msg.HW_CHECK.format(
+            cohort=_e(cohort),
+            title=_e(event["title"]),
+            date=event_date.strftime("%B %-d"),
+        )
+        try:
+            await bot.send_message(
+                chat_id=ta_staff["chat_id"],
+                text=text,
+                parse_mode="HTML",
+                reply_markup=keyboard,
+            )
+            await db.mark_hw_check_sent(event["id"], ta_staff["chat_id"])
+            logger.info(
+                "Sent HW check for event %d to TA %s (chat %d)",
+                event["id"], ta_name, ta_staff["chat_id"],
+            )
+        except TelegramError as e:
+            logger.error("Failed to send HW check to TA %s: %s", ta_name, e)
+
+
 async def send_weekly_consult_links(bot: Bot) -> None:
     """Every Monday: post each staff member's consultation link to the relevant group chat."""
     today = datetime.now(TZ).date()
@@ -509,6 +566,14 @@ async def init_scheduler(bot: Bot) -> None:
         seconds=60,
         kwargs={"bot": bot},
         id="weekly_task_reminders",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        check_hw_completion_checks,
+        trigger="interval",
+        seconds=60,
+        kwargs={"bot": bot},
+        id="hw_completion_checks",
         replace_existing=True,
     )
     if not scheduler.running:

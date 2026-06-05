@@ -1,14 +1,14 @@
 # messages.py
 
 REGISTERED = (
-    “✅ You're registered as {name}. You'll receive reminders before your sessions.\n\n”
-    “One more thing — type your timezone so I can send reminders at the right local time.”
+    "✅ You’re registered as {name}. You’ll receive reminders before your sessions.\n\n"
+    "One more thing — type your timezone so I can send reminders at the right local time."
 )
 
 TZ_PROMPT = (
-    “🕔 Let's set your timezone so reminders arrive at the right local time.\n\n”
-    “Type your timezone — e.g. <code>GMT+5</code>, <code>UTC+5</code>, “
-    “or an area name like <code>Asia/Tashkent</code>.”
+    "🕔 Let's set your timezone so reminders arrive at the right local time.\n\n"
+    "Type your timezone — e.g. <code>GMT+5</code>, <code>UTC+5</code>, "
+    "or an area name like <code>Asia/Tashkent</code>."
 )
 
 TZ_CONFIRM = (
@@ -173,3 +173,16 @@ SYNC_STATUS = (
     "📊 Last sync: {synced_at}\n"
     "Events loaded: {event_count}"
 )
+
+# --- TA assignment --------------------------------------------------------
+ASSIGN_TA_CHOOSE_COHORT = "🎓 Choose a cohort to assign a TA to:"
+ASSIGN_TA_CHOOSE_NAME = "🎓 Assign TA to <b>{cohort}</b>{current}:\n\nChoose a TA:"
+ASSIGN_TA_SAVED = "✅ <b>{ta}</b> assigned as TA for <b>{cohort}</b>."
+
+# --- Homework check -------------------------------------------------------
+HW_CHECK = (
+    "📚 <b>Homework check</b>\n\n"
+    "Did you finish checking homeworks for <b>{cohort}</b> — <b>{title}</b> ({date})?"
+)
+HW_CHECK_YES_ACK = "✅ Noted, homeworks checked!"
+HW_CHECK_NO_ACK = "📋 Noted. Don't forget to check them soon."

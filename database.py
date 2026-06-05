@@ -122,6 +122,30 @@ async def init_db() -> None:
                 answered_at      TEXT
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS ta_assignments (
+                cohort  TEXT PRIMARY KEY,
+                ta_name TEXT NOT NULL
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS hw_check_prompts_sent (
+                event_id INTEGER NOT NULL,
+                chat_id  INTEGER NOT NULL,
+                PRIMARY KEY (event_id, chat_id)
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS hw_completions_log (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                ta_name     TEXT NOT NULL,
+                chat_id     INTEGER NOT NULL,
+                cohort      TEXT NOT NULL,
+                event_ref   TEXT NOT NULL,
+                completed   INTEGER NOT NULL,
+                answered_at TEXT NOT NULL
+            )
+        """)
         # Seed from env var only for cohorts not already in DB
         from config import COHORT_GROUP_CHATS as _env_chats
         for cohort, chat_id in _env_chats.items():
@@ -503,3 +527,62 @@ async def get_last_sync() -> dict | None:
         )
         row = await cursor.fetchone()
         return dict(row) if row else None
+
+
+async def set_ta_assignment(cohort: str, ta_name: str) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO ta_assignments (cohort, ta_name) VALUES (?,?) "
+            "ON CONFLICT(cohort) DO UPDATE SET ta_name=excluded.ta_name",
+            (cohort, ta_name),
+        )
+        await db.commit()
+
+
+async def get_ta_assignment(cohort: str) -> str | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT ta_name FROM ta_assignments WHERE cohort=?", (cohort,)
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else None
+
+
+async def get_all_ta_assignments() -> dict[str, str]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("SELECT cohort, ta_name FROM ta_assignments")
+        return {r[0]: r[1] for r in await cursor.fetchall()}
+
+
+async def hw_check_sent(event_id: int, chat_id: int) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT 1 FROM hw_check_prompts_sent WHERE event_id=? AND chat_id=?",
+            (event_id, chat_id),
+        )
+        return await cursor.fetchone() is not None
+
+
+async def mark_hw_check_sent(event_id: int, chat_id: int) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT OR IGNORE INTO hw_check_prompts_sent (event_id, chat_id) VALUES (?,?)",
+            (event_id, chat_id),
+        )
+        await db.commit()
+
+
+async def log_hw_completion(
+    ta_name: str, chat_id: int, cohort: str, event_ref: str, completed: bool
+) -> None:
+    answered_at = datetime.now(timezone.utc).isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            INSERT INTO hw_completions_log
+                (ta_name, chat_id, cohort, event_ref, completed, answered_at)
+            VALUES (?,?,?,?,?,?)
+            """,
+            (ta_name, chat_id, cohort, event_ref, int(completed), answered_at),
+        )
+        await db.commit()

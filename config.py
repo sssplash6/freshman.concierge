@@ -37,6 +37,8 @@ STAFF_IDS: dict[int, str] = {
     791356497:  "Gulrukh",
 }
 
+STAFF_IDS.update(TA_IDS)
+
 STAFF_ID_BY_NAME: dict[str, int] = {name: uid for uid, name in STAFF_IDS.items()}
 
 REMIND_IDS: frozenset[int] = frozenset(uid for uid, name in STAFF_IDS.items() if name == "Sega")
@@ -45,4 +47,13 @@ REMIND_IDS: frozenset[int] = frozenset(uid for uid, name in STAFF_IDS.items() if
 # Example: '{"April Offline": -1001234567890, "May Online": -1009876543210}'
 COHORT_GROUP_CHATS: dict[str, int] = {
     k: int(v) for k, v in json.loads(os.getenv("COHORT_GROUP_CHATS", "{}")).items()
+}
+
+# TA names available for cohort assignment. Update with real names/IDs when TAs onboard.
+TA_NAMES: list[str] = ["a", "b", "c", "d"]
+
+# TA Telegram IDs → display name. Add real IDs here so TAs can register with /start.
+TA_IDS: dict[int, str] = {
+    int(uid): name
+    for uid, name in json.loads(os.getenv("TA_IDS", "{}")).items()
 }
