@@ -279,11 +279,11 @@ def _event_button_label(event: dict) -> str:
     cohort = event.get("cohort", "")
     if event.get("event_date"):
         d = date.fromisoformat(event["event_date"])
-        return f"{prefix}  {d.strftime('%b %-d')} · {cohort}"
+        return f"{prefix} · {d.strftime('%b %-d')} · {cohort}"
     elif event.get("week_start"):
         d = date.fromisoformat(event["week_start"])
-        return f"{prefix}  Wk {d.strftime('%b %-d')} · {cohort}"
-    return f"{prefix}  {cohort}"
+        return f"{prefix} · Wk {d.strftime('%b %-d')} · {cohort}"
+    return f"{prefix} · {cohort}"
 
 
 async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
