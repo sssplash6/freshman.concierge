@@ -230,6 +230,15 @@ async def cmd_upcoming(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.message.reply_text("".join(lines), parse_mode="HTML")
 
 
+async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_user or not update.message:
+        return
+    await update.message.reply_text(
+        "Menu refreshed.",
+        reply_markup=_main_keyboard_for(update.effective_user.id),
+    )
+
+
 async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_user or not update.message:
         return
@@ -1327,6 +1336,7 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_reload_notify, pattern=r"^rn:"))
     app.add_handler(CommandHandler("upcoming", cmd_upcoming))
     app.add_handler(MessageHandler(filters.Text(["📅 My Schedule"]), cmd_upcoming))
+    app.add_handler(CommandHandler("menu", cmd_menu))
     app.add_handler(CommandHandler("cancel", cmd_cancel))
     app.add_handler(CommandHandler("reload", cmd_reload))
     app.add_handler(MessageHandler(filters.Text(["🔄 Reload"]), cmd_reload))
