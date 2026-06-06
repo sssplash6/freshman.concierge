@@ -586,6 +586,88 @@ def append_hw_check_row(row: list) -> None:
         _format_hw_row(ws, row_idx, completed=(row[5] == "Yes"))
 
 
+_HW_STATS = "TA HW Stats"
+_HW_STATS_HEADERS = ["TA Name", "Checks Done", "Yes", "No", "Rate"]
+
+
+def write_hw_stats_tab(stats: list[dict]) -> None:
+    """Overwrite the 'TA HW Stats' tab with current per-TA summary."""
+    import gspread
+    from google.oauth2.service_account import Credentials
+    from config import GOOGLE_SERVICE_ACCOUNT_JSON, COMPLETIONS_SHEETS_ID
+
+    creds = Credentials.from_service_account_info(GOOGLE_SERVICE_ACCOUNT_JSON, scopes=_SCOPES)
+    gc = gspread.Client(auth=creds)
+    sh = gc.open_by_key(COMPLETIONS_SHEETS_ID)
+
+    try:
+        ws = sh.worksheet(_HW_STATS)
+        ws.clear()
+    except gspread.exceptions.WorksheetNotFound:
+        ws = sh.add_worksheet(_HW_STATS, rows=100, cols=5)
+
+    rows = [_HW_STATS_HEADERS]
+    for s in stats:
+        rows.append([
+            s["ta_name"],
+            s["total"],
+            s["yes_count"],
+            s["no_count"],
+            f"{s['rate']}%",
+        ])
+    ws.update(rows, value_input_option="USER_ENTERED")
+
+    sid = ws.id
+    n_data = len(stats)
+    requests = [
+        # Header: dark navy
+        {
+            "repeatCell": {
+                "range": {"sheetId": sid, "startRowIndex": 0, "endRowIndex": 1,
+                          "startColumnIndex": 0, "endColumnIndex": 5},
+                "cell": {"userEnteredFormat": {
+                    "backgroundColor": _rgb(0.129, 0.196, 0.341),
+                    "textFormat": {"bold": True, "fontSize": 11,
+                                   "foregroundColor": _rgb(1, 1, 1)},
+                    "horizontalAlignment": "CENTER",
+                    "verticalAlignment": "MIDDLE",
+                }},
+                "fields": "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment)",
+            }
+        },
+        # Freeze header
+        {
+            "updateSheetProperties": {
+                "properties": {"sheetId": sid, "gridProperties": {"frozenRowCount": 1}},
+                "fields": "gridProperties.frozenRowCount",
+            }
+        },
+    ]
+    # Colour rate column: green ≥ 80%, amber 50–79%, red < 50%
+    for i, s in enumerate(stats):
+        row_i = i + 1  # 0-based, skip header
+        rate = s["rate"]
+        if rate >= 80:
+            bg = _rgb(0.851, 0.957, 0.851)
+        elif rate >= 50:
+            bg = _rgb(1.0, 0.957, 0.800)
+        else:
+            bg = _rgb(0.988, 0.894, 0.882)
+        requests.append({
+            "repeatCell": {
+                "range": {"sheetId": sid, "startRowIndex": row_i, "endRowIndex": row_i + 1,
+                          "startColumnIndex": 4, "endColumnIndex": 5},
+                "cell": {"userEnteredFormat": {
+                    "backgroundColor": bg,
+                    "textFormat": {"bold": True},
+                    "horizontalAlignment": "CENTER",
+                }},
+                "fields": "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)",
+            }
+        })
+    sh.batch_update({"requests": requests})
+
+
 def fetch_all_events() -> list[dict]:
     """Authenticate with Google Sheets and parse all events."""
     import gspread

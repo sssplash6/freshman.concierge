@@ -65,7 +65,7 @@ from scheduler import (
     SOURCE_TZ,
     fixed_seminar_events_for,
 )
-from sheets_parser import append_completion_row, append_hw_check_row
+from sheets_parser import append_completion_row, append_hw_check_row, write_hw_stats_tab
 
 
 SELECT_PERSON, SELECT_EVENT = range(2)
@@ -1010,6 +1010,7 @@ async def cb_completion_reason(update: Update, context: ContextTypes.DEFAULT_TYP
             pending["title"], pending["event_date"], "No", reason,
         ]
         asyncio.create_task(asyncio.to_thread(append_hw_check_row, row))
+        asyncio.create_task(_refresh_hw_stats())
         await update.message.reply_text(msg.HW_CHECK_NO_ACK)
         return ConversationHandler.END
 
@@ -1240,6 +1241,11 @@ async def cb_assign_ta_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE
     return ConversationHandler.END
 
 
+async def _refresh_hw_stats() -> None:
+    stats = await db.get_hw_stats()
+    asyncio.create_task(asyncio.to_thread(write_hw_stats_tab, stats))
+
+
 async def cb_hw_yes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if not query:
@@ -1257,6 +1263,7 @@ async def cb_hw_yes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             event.get("event_date", ""), "Yes", "",
         ]
         asyncio.create_task(asyncio.to_thread(append_hw_check_row, row))
+        asyncio.create_task(_refresh_hw_stats())
     await query.edit_message_text(msg.HW_CHECK_YES_ACK)
 
 

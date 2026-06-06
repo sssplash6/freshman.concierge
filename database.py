@@ -610,6 +610,30 @@ async def log_hw_completion(
         await db.commit()
 
 
+async def get_hw_stats() -> list[dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("""
+            SELECT ta_name,
+                   COUNT(*)            AS total,
+                   SUM(completed)      AS yes_count,
+                   COUNT(*) - SUM(completed) AS no_count
+            FROM hw_completions_log
+            GROUP BY ta_name
+            ORDER BY ta_name
+        """)
+        rows = await cursor.fetchall()
+        return [
+            {
+                "ta_name": r[0],
+                "total":     r[1],
+                "yes_count": r[2],
+                "no_count":  r[3],
+                "rate": round(r[2] / r[1] * 100) if r[1] else 0,
+            }
+            for r in rows
+        ]
+
+
 async def add_ta_to_roster(telegram_id: int, display_name: str) -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
