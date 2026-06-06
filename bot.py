@@ -398,6 +398,8 @@ async def cmd_setlink(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 
     cohorts = await db.get_cohorts_for_staff(staff["display_name"])
     if not cohorts:
+        cohorts = await db.get_all_cohorts()
+    if not cohorts:
         await update.message.reply_text(msg.SETLINK_NO_COHORTS)
         return ConversationHandler.END
 
@@ -1154,6 +1156,16 @@ async def cmd_sync_status(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
 
 
+async def cmd_clearlinks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_user or not update.message:
+        return
+    if update.effective_user.id not in REMIND_IDS and update.effective_user.id != ADMIN_CHAT_ID:
+        await update.message.reply_text(msg.ADMIN_ONLY)
+        return
+    count = await db.clear_all_consult_links()
+    await update.message.reply_text(f"✅ Cleared {count} saved consultation link(s).")
+
+
 async def cmd_assign_ta(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if not update.effective_user or not update.message:
         return ConversationHandler.END
@@ -1497,6 +1509,7 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("sync_status", cmd_sync_status))
     app.add_handler(MessageHandler(filters.Text(["📊 Sync Status"]), cmd_sync_status))
     app.add_handler(CommandHandler("listgroups", cmd_listgroups))
+    app.add_handler(CommandHandler("clearlinks", cmd_clearlinks))
     app.add_handler(CommandHandler("testlog", cmd_testlog))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_fallback))
     app.add_handler(CallbackQueryHandler(_cb_stale))

@@ -146,6 +146,12 @@ async def init_db() -> None:
                 answered_at TEXT NOT NULL
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS ta_roster (
+                telegram_id  INTEGER PRIMARY KEY,
+                display_name TEXT NOT NULL
+            )
+        """)
         # Seed from env var only for cohorts not already in DB
         from config import COHORT_GROUP_CHATS as _env_chats
         for cohort, chat_id in _env_chats.items():
@@ -400,10 +406,17 @@ async def get_all_consult_links() -> list[dict]:
 async def get_cohorts_for_staff(staff_name: str) -> list[str]:
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
-            "SELECT DISTINCT cohort FROM events WHERE staff_name=? AND type='consult' ORDER BY cohort",
+            "SELECT DISTINCT cohort FROM events WHERE staff_name=? ORDER BY cohort",
             (staff_name,),
         )
         return [r[0] for r in await cursor.fetchall()]
+
+
+async def clear_all_consult_links() -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("DELETE FROM consult_links")
+        await db.commit()
+        return cursor.rowcount
 
 
 async def get_event_by_id(event_id: int) -> dict | None:
@@ -586,3 +599,29 @@ async def log_hw_completion(
             (ta_name, chat_id, cohort, event_ref, int(completed), answered_at),
         )
         await db.commit()
+
+
+async def add_ta_to_roster(telegram_id: int, display_name: str) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO ta_roster (telegram_id, display_name) VALUES (?,?) "
+            "ON CONFLICT(telegram_id) DO UPDATE SET display_name=excluded.display_name",
+            (telegram_id, display_name),
+        )
+        await db.commit()
+
+
+async def get_ta_roster() -> list[dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT telegram_id, display_name FROM ta_roster ORDER BY display_name")
+        return [dict(r) for r in await cursor.fetchall()]
+
+
+async def get_ta_name_from_roster(telegram_id: int) -> str | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT display_name FROM ta_roster WHERE telegram_id=?", (telegram_id,)
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else None
