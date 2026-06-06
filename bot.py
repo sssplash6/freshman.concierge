@@ -1359,14 +1359,15 @@ def build_app() -> Application:
         ],
         states={
             TASK_PERSON:      [CallbackQueryHandler(cb_task_person, pattern=r"^tp:")],
-            TASK_DESC:        [MessageHandler(filters.TEXT & ~filters.COMMAND, cb_task_desc)],
+            TASK_DESC:        [MessageHandler(filters.TEXT & ~filters.COMMAND & ~_keyboard_buttons, cb_task_desc)],
             TASK_DEADLINE:    [CallbackQueryHandler(cb_task_deadline, pattern=r"^td:")],
-            TASK_CUSTOM_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, cb_task_custom_date)],
+            TASK_CUSTOM_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~_keyboard_buttons, cb_task_custom_date)],
         },
         fallbacks=[
             CallbackQueryHandler(cb_task_cancel, pattern=r"^tx$"),
             CommandHandler("cancel", cb_task_cancel),
             MessageHandler(filters.Text(["cancel", "Cancel", "❌ Cancel"]), cb_task_cancel),
+            MessageHandler(_keyboard_buttons, cb_task_cancel),
         ],
         per_chat=True,
         per_message=False,
@@ -1443,16 +1444,26 @@ def build_app() -> Application:
         per_message=False,
     )
 
+    _keyboard_buttons = filters.Text([
+        "← Back", "⚙️ Settings", "📅 My Schedule", "📣 Remind",
+        "📝 Assign Task", "📢 Broadcast", "🔄 Reload", "📊 Sync Status",
+        "🔗 Set Link", "🌍 Timezone", "🎓 Assign TA",
+    ])
+
     add_ta_conv = ConversationHandler(
         entry_points=[
             CommandHandler("addta", cmd_add_ta),
             MessageHandler(filters.Text(["➕ Add TA"]), cmd_add_ta),
         ],
         states={
-            ADD_TA_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, cb_add_ta_name)],
-            ADD_TA_ID:   [MessageHandler(filters.TEXT & ~filters.COMMAND, cb_add_ta_id)],
+            ADD_TA_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~_keyboard_buttons, cb_add_ta_name)],
+            ADD_TA_ID:   [MessageHandler(filters.TEXT & ~filters.COMMAND & ~_keyboard_buttons, cb_add_ta_id)],
         },
-        fallbacks=[],
+        fallbacks=[
+            CommandHandler("cancel", cb_task_cancel),
+            MessageHandler(filters.Text(["← Back"]), cmd_settings_back),
+            MessageHandler(_keyboard_buttons, cb_task_cancel),
+        ],
         per_chat=True,
         per_message=False,
     )
