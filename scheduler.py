@@ -448,7 +448,7 @@ async def check_hw_completion_checks(bot: Bot) -> None:
         if now_local.date() != event_date + timedelta(days=3):
             continue
 
-        if await db.hw_check_sent(event["id"], ta_staff["chat_id"]):
+        if await db.hw_check_sent(cohort, event["event_date"], ta_staff["chat_id"]):
             continue
 
         keyboard = InlineKeyboardMarkup([[
@@ -467,7 +467,7 @@ async def check_hw_completion_checks(bot: Bot) -> None:
                 parse_mode="HTML",
                 reply_markup=keyboard,
             )
-            await db.mark_hw_check_sent(event["id"], ta_staff["chat_id"])
+            await db.mark_hw_check_sent(cohort, event["event_date"], ta_staff["chat_id"])
             logger.info(
                 "Sent HW check for event %d to TA %s (chat %d)",
                 event["id"], ta_name, ta_staff["chat_id"],

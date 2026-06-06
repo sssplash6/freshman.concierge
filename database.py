@@ -135,6 +135,15 @@ async def init_db() -> None:
                 PRIMARY KEY (event_id, chat_id)
             )
         """)
+        # Stable-key version: survives event table re-syncs that change event IDs.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS hw_check_sent_v2 (
+                cohort     TEXT NOT NULL,
+                event_date TEXT NOT NULL,
+                chat_id    INTEGER NOT NULL,
+                PRIMARY KEY (cohort, event_date, chat_id)
+            )
+        """)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS hw_completions_log (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -567,20 +576,20 @@ async def get_all_ta_assignments() -> dict[str, str]:
         return {r[0]: r[1] for r in await cursor.fetchall()}
 
 
-async def hw_check_sent(event_id: int, chat_id: int) -> bool:
+async def hw_check_sent(cohort: str, event_date: str, chat_id: int) -> bool:
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
-            "SELECT 1 FROM hw_check_prompts_sent WHERE event_id=? AND chat_id=?",
-            (event_id, chat_id),
+            "SELECT 1 FROM hw_check_sent_v2 WHERE cohort=? AND event_date=? AND chat_id=?",
+            (cohort, event_date, chat_id),
         )
         return await cursor.fetchone() is not None
 
 
-async def mark_hw_check_sent(event_id: int, chat_id: int) -> None:
+async def mark_hw_check_sent(cohort: str, event_date: str, chat_id: int) -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "INSERT OR IGNORE INTO hw_check_prompts_sent (event_id, chat_id) VALUES (?,?)",
-            (event_id, chat_id),
+            "INSERT OR IGNORE INTO hw_check_sent_v2 (cohort, event_date, chat_id) VALUES (?,?,?)",
+            (cohort, event_date, chat_id),
         )
         await db.commit()
 
