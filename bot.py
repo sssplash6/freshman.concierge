@@ -48,6 +48,7 @@ SETTINGS_KEYBOARD = ReplyKeyboardMarkup(
 )
 
 import pytz
+from dateutil import parser as _du_parser
 
 import database as db
 import messages as msg
@@ -653,7 +654,6 @@ async def cb_task_custom_date(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     # Try to parse the typed date using dateutil.
     try:
-        from dateutil import parser as _du_parser
         now = _dt.now(SOURCE_TZ)
         # Parse with a neutral default (midnight) so we can detect whether
         # the user supplied a time themselves.
