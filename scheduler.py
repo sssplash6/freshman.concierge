@@ -108,6 +108,33 @@ _FIXED_SEMINARS = [
     ("Rustam",  "thu", 18, 30, "May Online",    "Thursday",  "7:30 PM"),
 ]
 
+_DOW = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
+
+
+def _next_weekday(dow: str) -> date:
+    today = date.today()
+    delta = (_DOW[dow] - today.weekday()) % 7
+    return today + timedelta(days=delta or 7)  # if today, use next week
+
+
+def fixed_seminar_events_for(staff_name: str) -> list[dict]:
+    """Synthetic event dicts for the fixed seminars assigned to a staff member."""
+    result = []
+    for name, dow, _, _, cohort, weekday_label, time_label in _FIXED_SEMINARS:
+        if name != staff_name:
+            continue
+        result.append({
+            "type": "seminar",
+            "cohort": cohort,
+            "weekday_label": weekday_label,
+            "time_label": time_label,
+            "event_date": _next_weekday(dow).isoformat(),
+            "staff_name": staff_name,
+            "title": "Seminar",
+            "id": None,
+        })
+    return result
+
 
 def get_scheduler() -> AsyncIOScheduler:
     global _scheduler
@@ -176,6 +203,12 @@ def format_reminder_message(event: dict, tz: pytz.BaseTzInfo | None = None) -> s
                 date=d.strftime("%B %-d"),
                 duration=event.get("duration_min") or "?",
             )
+    elif event["type"] == "seminar":
+        return msg.REMINDER_SEMINAR.format(
+            cohort=_e(event["cohort"]),
+            weekday=event.get("weekday_label", ""),
+            time=event.get("time_label", ""),
+        )
     raise ValueError(f"Unknown event type: {event['type']!r}")
 
 

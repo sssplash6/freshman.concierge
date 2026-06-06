@@ -63,6 +63,7 @@ from scheduler import (
     parse_timezone_input,
     tz_pretty,
     SOURCE_TZ,
+    fixed_seminar_events_for,
 )
 from sheets_parser import append_completion_row, append_hw_check_row
 
@@ -279,7 +280,8 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 
 def _event_button_label(event: dict) -> str:
-    prefix = "L" if event["type"] == "lecture" else "C"
+    t = event["type"]
+    prefix = "L" if t == "lecture" else "S" if t == "seminar" else "C"
     cohort = event.get("cohort", "")
     if event.get("event_date"):
         d = date.fromisoformat(event["event_date"])
@@ -320,6 +322,8 @@ async def cb_remind_person(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     context.user_data["remind_name"] = name
 
     events = await db.get_upcoming_events_for_staff(name, limit=10)
+    seminars = fixed_seminar_events_for(name)
+    events = seminars + events
     if not events:
         await query.edit_message_text(f"No upcoming sessions found for {_e(name)}.")
         return ConversationHandler.END
