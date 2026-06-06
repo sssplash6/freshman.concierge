@@ -1320,6 +1320,13 @@ async def cb_add_ta_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     return ConversationHandler.END
 
 
+_keyboard_buttons = filters.Text([
+    "← Back", "⚙️ Settings", "📅 My Schedule", "📣 Remind",
+    "📝 Assign Task", "📢 Broadcast", "🔄 Reload", "📊 Sync Status",
+    "🔗 Set Link", "🌍 Timezone", "🎓 Assign TA",
+])
+
+
 def build_app() -> Application:
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
@@ -1443,12 +1450,6 @@ def build_app() -> Application:
         per_chat=True,
         per_message=False,
     )
-
-    _keyboard_buttons = filters.Text([
-        "← Back", "⚙️ Settings", "📅 My Schedule", "📣 Remind",
-        "📝 Assign Task", "📢 Broadcast", "🔄 Reload", "📊 Sync Status",
-        "🔗 Set Link", "🌍 Timezone", "🎓 Assign TA",
-    ])
 
     add_ta_conv = ConversationHandler(
         entry_points=[
