@@ -723,6 +723,30 @@ async def cb_task_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     return ConversationHandler.END
 
 
+async def cancel_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Generic conversation fallback.
+
+    Ends whatever conversation is active and acknowledges, without forcing a new
+    reply keyboard (so the keyboard the user just tapped stays put and they can
+    re-tap the button). Wired as a fallback on every conversation so a menu-button
+    tap is never swallowed as text input and there is always a way out.
+    """
+    context.user_data.clear()
+    if update.message:
+        await update.message.reply_text(msg.CANCELLED)
+    return ConversationHandler.END
+
+
+async def back_to_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Conversation fallback for the '← Back' button: exit the flow AND return to
+    the settings menu (the plain cmd_settings_back returns None, which would leave
+    the conversation dangling)."""
+    context.user_data.clear()
+    if update.message:
+        await update.message.reply_text("⚙️ Settings", reply_markup=SETTINGS_KEYBOARD)
+    return ConversationHandler.END
+
+
 def _task_completion_row(task: dict, completed: bool, reason: str) -> list:
     return [
         _dt.now(_tz.utc).strftime("%Y-%m-%d %H:%M UTC"),
@@ -1356,9 +1380,14 @@ def build_app() -> Application:
         ],
         states={
             SETLINK_COHORT: [CallbackQueryHandler(cb_setlink_cohort, pattern=r"^sl:")],
-            SETLINK_URL:    [MessageHandler(filters.TEXT & ~filters.COMMAND, cb_setlink_url)],
+            SETLINK_URL:    [MessageHandler(filters.TEXT & ~filters.COMMAND & ~_keyboard_buttons, cb_setlink_url)],
         },
-        fallbacks=[CallbackQueryHandler(cb_setlink_cohort, pattern=r"^sl:cancel$")],
+        fallbacks=[
+            CallbackQueryHandler(cb_setlink_cohort, pattern=r"^sl:cancel$"),
+            CommandHandler("cancel", cancel_to_menu),
+            MessageHandler(_keyboard_buttons, cancel_to_menu),
+        ],
+        allow_reentry=True,
         per_chat=True,
         per_message=False,
     )
@@ -1370,9 +1399,12 @@ def build_app() -> Application:
             CallbackQueryHandler(cb_hw_no,         pattern=r"^hw:no:"),
         ],
         states={
-            AWAITING_REASON: [MessageHandler(filters.TEXT & ~filters.COMMAND, cb_completion_reason)],
+            AWAITING_REASON: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~_keyboard_buttons, cb_completion_reason)],
         },
-        fallbacks=[],
+        fallbacks=[
+            CommandHandler("cancel", cancel_to_menu),
+            MessageHandler(_keyboard_buttons, cancel_to_menu),
+        ],
         allow_reentry=True,
         per_chat=True,
         per_message=False,
@@ -1395,6 +1427,7 @@ def build_app() -> Application:
             MessageHandler(filters.Text(["cancel", "Cancel", "❌ Cancel"]), cb_task_cancel),
             MessageHandler(_keyboard_buttons, cb_task_cancel),
         ],
+        allow_reentry=True,
         per_chat=True,
         per_message=False,
     )
@@ -1405,13 +1438,18 @@ def build_app() -> Application:
             MessageHandler(filters.Text(["📢 Broadcast"]), cmd_broadcast),
         ],
         states={
-            BROADCAST_MSG:     [MessageHandler(filters.TEXT & ~filters.COMMAND, cb_broadcast_text)],
+            BROADCAST_MSG:     [MessageHandler(filters.TEXT & ~filters.COMMAND & ~_keyboard_buttons, cb_broadcast_text)],
             BROADCAST_CONFIRM: [
                 CallbackQueryHandler(cb_broadcast_send,   pattern=r"^bcast:send$"),
                 CallbackQueryHandler(cb_broadcast_cancel, pattern=r"^bcast:cancel$"),
             ],
         },
-        fallbacks=[CallbackQueryHandler(cb_broadcast_cancel, pattern=r"^bcast:cancel$")],
+        fallbacks=[
+            CallbackQueryHandler(cb_broadcast_cancel, pattern=r"^bcast:cancel$"),
+            CommandHandler("cancel", cancel_to_menu),
+            MessageHandler(_keyboard_buttons, cancel_to_menu),
+        ],
+        allow_reentry=True,
         per_chat=True,
         per_message=False,
     )
@@ -1424,10 +1462,14 @@ def build_app() -> Application:
         ],
         states={
             TZ_TYPE: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, cb_tz_text),
+                MessageHandler(filters.TEXT & ~filters.COMMAND & ~_keyboard_buttons, cb_tz_text),
             ],
         },
-        fallbacks=[],
+        fallbacks=[
+            CommandHandler("cancel", cancel_to_menu),
+            MessageHandler(_keyboard_buttons, cancel_to_menu),
+        ],
+        allow_reentry=True,
         per_chat=True,
         per_message=False,
     )
@@ -1441,7 +1483,12 @@ def build_app() -> Application:
             SELECT_PERSON: [CallbackQueryHandler(cb_remind_person, pattern=r"^rp:")],
             SELECT_EVENT:  [CallbackQueryHandler(cb_remind_event,  pattern=r"^re:")],
         },
-        fallbacks=[CallbackQueryHandler(cb_remind_cancel, pattern=r"^rc$")],
+        fallbacks=[
+            CallbackQueryHandler(cb_remind_cancel, pattern=r"^rc$"),
+            CommandHandler("cancel", cancel_to_menu),
+            MessageHandler(_keyboard_buttons, cancel_to_menu),
+        ],
+        allow_reentry=True,
         per_message=False,
     )
 
@@ -1449,9 +1496,14 @@ def build_app() -> Application:
         entry_points=[CommandHandler("setgroup", cmd_setgroup)],
         states={
             SETGROUP_COHORT: [CallbackQueryHandler(cb_setgroup_cohort, pattern=r"^sg:")],
-            SETGROUP_ID:     [MessageHandler(filters.TEXT & ~filters.COMMAND, cb_setgroup_id)],
+            SETGROUP_ID:     [MessageHandler(filters.TEXT & ~filters.COMMAND & ~_keyboard_buttons, cb_setgroup_id)],
         },
-        fallbacks=[CallbackQueryHandler(cb_setgroup_cohort, pattern=r"^sg:cancel$")],
+        fallbacks=[
+            CallbackQueryHandler(cb_setgroup_cohort, pattern=r"^sg:cancel$"),
+            CommandHandler("cancel", cancel_to_menu),
+            MessageHandler(_keyboard_buttons, cancel_to_menu),
+        ],
+        allow_reentry=True,
         per_chat=True,
         per_message=False,
     )
@@ -1465,7 +1517,12 @@ def build_app() -> Application:
             ASSIGN_TA_COHORT: [CallbackQueryHandler(cb_assign_ta_cohort, pattern=r"^tac:")],
             ASSIGN_TA_NAME:   [CallbackQueryHandler(cb_assign_ta_name,   pattern=r"^tan:")],
         },
-        fallbacks=[CallbackQueryHandler(cb_assign_ta_cancel, pattern=r"^tacx$")],
+        fallbacks=[
+            CallbackQueryHandler(cb_assign_ta_cancel, pattern=r"^tacx$"),
+            CommandHandler("cancel", cancel_to_menu),
+            MessageHandler(_keyboard_buttons, cancel_to_menu),
+        ],
+        allow_reentry=True,
         per_chat=True,
         per_message=False,
     )
@@ -1481,9 +1538,10 @@ def build_app() -> Application:
         },
         fallbacks=[
             CommandHandler("cancel", cb_task_cancel),
-            MessageHandler(filters.Text(["← Back"]), cmd_settings_back),
+            MessageHandler(filters.Text(["← Back"]), back_to_settings),
             MessageHandler(_keyboard_buttons, cb_task_cancel),
         ],
+        allow_reentry=True,
         per_chat=True,
         per_message=False,
     )
