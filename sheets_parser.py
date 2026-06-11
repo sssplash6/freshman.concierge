@@ -14,6 +14,15 @@ MONTH_MAP = {
     "september": 9, "october": 10, "november": 11, "december": 12,
 }
 
+# Retired cohorts: any cohort whose name contains one of these (case-insensitive)
+# is dropped during sync, so it disappears from events and everything downstream.
+EXCLUDED_COHORT_KEYWORDS = ("february", "november")
+
+
+def is_excluded_cohort(cohort: str) -> bool:
+    c = (cohort or "").lower()
+    return any(k in c for k in EXCLUDED_COHORT_KEYWORDS)
+
 _NAME_ALIASES: dict[str, str] = {
     "dr. lyusyena": "Lyusyena",
     "lyusyena": "Lyusyena",
@@ -704,5 +713,12 @@ def fetch_all_events() -> list[dict]:
         logger.info("Parsed %d consult events.", len(consult_events))
     except Exception as e:
         logger.error("Failed to parse 2026 Consults: %s", e)
+
+    before = len(events)
+    events = [e for e in events if not is_excluded_cohort(e.get("cohort", ""))]
+    dropped = before - len(events)
+    if dropped:
+        logger.info("Dropped %d events from retired cohorts (%s).",
+                    dropped, ", ".join(EXCLUDED_COHORT_KEYWORDS))
 
     return events
