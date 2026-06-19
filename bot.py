@@ -1000,6 +1000,32 @@ async def cb_weekly_complete(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.edit_message_reply_markup(reply_markup=None)
 
 
+async def _resolve_completion(event_id: int, chat_id: int) -> dict | None:
+    """Resolve a completion-check button to (staff_name, title, cohort, event_ref).
+
+    Prefers the metadata snapshot taken at send time, which survives the event-id
+    churn of a sheet sync; falls back to the live events table for any prompt that
+    predates the snapshot. Returns None only when nothing can be resolved.
+    """
+    snap = await db.get_completion_prompt(event_id, chat_id)
+    if snap:
+        return {
+            "staff_name": snap.get("staff_name") or "",
+            "title": snap.get("title") or "",
+            "cohort": snap.get("cohort") or "",
+            "event_ref": snap.get("event_ref") or "",
+        }
+    event = await db.get_event_by_id(event_id)
+    if event:
+        return {
+            "staff_name": event["staff_name"],
+            "title": event["title"],
+            "cohort": event["cohort"],
+            "event_ref": event.get("event_date") or event.get("week_start", ""),
+        }
+    return None
+
+
 async def cb_completion_yes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if not query:
@@ -1008,25 +1034,25 @@ async def cb_completion_yes(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     event_id = int(query.data[8:])  # strip "cc:yes:"
     await db.mark_completion_answered(event_id, query.from_user.id)
-    event = await db.get_event_by_id(event_id)
-    if event:
-        await db.log_completion(
-            type="event",
-            staff_name=event["staff_name"],
-            chat_id=query.from_user.id,
-            title=event["title"],
-            cohort=event["cohort"],
-            event_ref=event.get("event_date") or event.get("week_start", ""),
-            completed=True,
-        )
-        row = [
-            _dt.now(_tz.utc).strftime("%Y-%m-%d %H:%M UTC"),
-            event["staff_name"], "Event",
-            event["title"], event["cohort"],
-            event.get("event_date") or event.get("week_start", ""), "Yes", "",
-        ]
-        asyncio.create_task(asyncio.to_thread(append_completion_row, row))
-
+    meta = await _resolve_completion(event_id, query.from_user.id)
+    if not meta:
+        await query.edit_message_text("Event no longer found.")
+        return
+    await db.log_completion(
+        type="event",
+        staff_name=meta["staff_name"],
+        chat_id=query.from_user.id,
+        title=meta["title"],
+        cohort=meta["cohort"],
+        event_ref=meta["event_ref"],
+        completed=True,
+    )
+    row = [
+        _dt.now(_tz.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        meta["staff_name"], "Event",
+        meta["title"], meta["cohort"], meta["event_ref"], "Yes", "",
+    ]
+    asyncio.create_task(asyncio.to_thread(append_completion_row, row))
     await query.edit_message_text(msg.COMPLETION_YES_ACK)
 
 
@@ -1038,17 +1064,17 @@ async def cb_completion_no(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     event_id = int(query.data[7:])  # strip "cc:no:"
     await db.mark_completion_answered(event_id, query.from_user.id)
-    event = await db.get_event_by_id(event_id)
-    if not event:
+    meta = await _resolve_completion(event_id, query.from_user.id)
+    if not meta:
         await query.edit_message_text("Event no longer found.")
         return ConversationHandler.END
 
     context.user_data["pending_completion"] = {
         "event_id": event_id,
-        "staff_name": event["staff_name"],
-        "title": event["title"],
-        "cohort": event["cohort"],
-        "event_ref": event.get("event_date") or event.get("week_start", ""),
+        "staff_name": meta["staff_name"],
+        "title": meta["title"],
+        "cohort": meta["cohort"],
+        "event_ref": meta["event_ref"],
         "chat_id": query.from_user.id,
     }
     await query.edit_message_text(msg.COMPLETION_NO_PROMPT)

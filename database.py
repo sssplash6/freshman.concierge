@@ -394,6 +394,24 @@ async def mark_completion_answered(event_id: int, chat_id: int) -> None:
         await db.commit()
 
 
+async def get_completion_prompt(event_id: int, chat_id: int) -> dict | None:
+    """The metadata snapshot taken when a completion check was sent.
+
+    Keyed on the event_id that's encoded in the button, so it resolves even
+    after a sheet sync reassigns event row IDs (the live events table would
+    no longer find that id). Returns None for buttons predating the snapshot.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT staff_name, title, cohort, event_ref FROM completion_prompts_sent "
+            "WHERE event_id = ? AND chat_id = ?",
+            (event_id, chat_id),
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+
 async def get_unanswered_completion_prompts(cutoff_iso: str) -> list[dict]:
     """Completion check-ins sent on/before cutoff that nobody has answered yet."""
     async with aiosqlite.connect(DB_PATH) as db:
