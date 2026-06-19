@@ -565,27 +565,9 @@ async def check_skipped_responses(bot: Bot) -> None:
         await db.mark_completion_answered(p["event_id"], p["chat_id"])
         logger.info("Logged skipped completion check (event_id=%s chat=%s)", p["event_id"], p["chat_id"])
 
-    # 2) Custom tasks assigned by Sega.
+    # 2) Custom tasks assigned by Sega — logged to the dedicated Tasks Log only.
     for task in await db.get_skippable_tasks(cutoff):
         await db.set_task_result(task["id"], False, reason)
-        await db.log_completion(
-            type="custom_task",
-            staff_name=task["staff_name"],
-            chat_id=0,
-            title=task["description"],
-            cohort="—",
-            event_ref=task["deadline"],
-            completed=False,
-            reason=reason,
-        )
-        row = [ts, task["staff_name"], "Custom Task",
-               task["description"], "—",
-               format_task_deadline(task["deadline"], SOURCE_TZ),
-               "Skipped", reason]
-        try:
-            await asyncio.to_thread(append_completion_row, row)
-        except Exception:
-            logger.exception("Failed to log skipped task to sheet")
         task_row = [ts, task["staff_name"], task["description"],
                     task.get("assigned_by") or "—",
                     format_task_deadline(task["deadline"], SOURCE_TZ),

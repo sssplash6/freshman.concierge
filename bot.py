@@ -806,16 +806,6 @@ async def back_to_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     return ConversationHandler.END
 
 
-def _task_completion_row(task: dict, completed: bool, reason: str) -> list:
-    return [
-        _dt.now(_tz.utc).strftime("%Y-%m-%d %H:%M UTC"),
-        task["staff_name"], "Custom Task",
-        task["description"], "—",
-        format_task_deadline(task["deadline"], SOURCE_TZ),
-        "Yes" if completed else "No", reason,
-    ]
-
-
 def _task_assignment_row(name: str, desc: str, deadline_iso: str, assigned_by: str) -> list:
     """Row for the dedicated 'Tasks Log' tab, written when a task is set."""
     return [
@@ -846,16 +836,6 @@ async def cb_task_yes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     task = await db.get_task(task_id)
     if task:
         await db.set_task_result(task_id, True)
-        await db.log_completion(
-            type="custom_task",
-            staff_name=task["staff_name"],
-            chat_id=query.from_user.id,
-            title=task["description"],
-            cohort="—",
-            event_ref=task["deadline"],
-            completed=True,
-        )
-        asyncio.create_task(asyncio.to_thread(append_completion_row, _task_completion_row(task, True, "")))
         asyncio.create_task(asyncio.to_thread(append_task_row, _task_log_row(task, True, "")))
 
     await query.edit_message_text(msg.COMPLETION_YES_ACK)
@@ -1087,23 +1067,12 @@ async def cb_completion_reason(update: Update, context: ContextTypes.DEFAULT_TYP
 
     if pending.get("kind") == "task":
         await db.set_task_result(pending["task_id"], False, reason)
-        await db.log_completion(
-            type="custom_task",
-            staff_name=pending["staff_name"],
-            chat_id=pending["chat_id"],
-            title=pending["description"],
-            cohort="—",
-            event_ref=pending["deadline"],
-            completed=False,
-            reason=reason,
-        )
         task = {
             "staff_name": pending["staff_name"],
             "description": pending["description"],
             "deadline": pending["deadline"],
             "assigned_by": pending.get("assigned_by"),
         }
-        asyncio.create_task(asyncio.to_thread(append_completion_row, _task_completion_row(task, False, reason)))
         asyncio.create_task(asyncio.to_thread(append_task_row, _task_log_row(task, False, reason)))
         await update.message.reply_text(msg.COMPLETION_NO_ACK)
         return ConversationHandler.END
