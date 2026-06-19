@@ -226,13 +226,23 @@ def format_weekly_task_reminder(event: dict) -> str:
 
 
 async def send_weekly_task_reminders(bot: Bot) -> None:
-    """Weekly Saturday 17:00 nudge (in each recipient's own zone) for pending weekly tasks.
+    """Weekly Saturday 17:00 nudge (in each recipient's own zone).
 
-    Runs on a 60-second interval; the per-staff local Saturday 17:00–17:30 window plus the
-    once-per-day idempotency key keep it to a single send per task per week.
+    Consult events: prompt the staff member to set *next* week's booking link,
+    with a 🔗 Set Link button — unless they've already set/updated one for that
+    cohort this week. Setting it fires the link to the group immediately.
+    Any other weekly task keeps the classic 'tap Done' completion nudge for the
+    current week.
+
+    Runs on a 60-second interval; the per-staff local Saturday 17:00–17:30 window
+    plus the once-per-day idempotency key keep it to a single send per item per week.
     """
     events = await db.get_all_events()
     staff_list = await db.get_all_staff()
+    link_updated = {
+        (l["staff_name"], l["cohort"]): (l.get("updated_at") or "")
+        for l in await db.get_all_consult_links()
+    }
 
     for staff in staff_list:
         now_local = datetime.now(staff_tz(staff))
@@ -240,25 +250,50 @@ async def send_weekly_task_reminders(bot: Bot) -> None:
         if not (now_local.weekday() == 5 and now_local.hour == 17 and now_local.minute < 30):
             continue
         today = now_local.date()
-        week_start_str = (today - timedelta(days=today.weekday())).isoformat()
+        current_monday = today - timedelta(days=today.weekday())
+        next_monday = current_monday + timedelta(days=7)
+        next_sunday = next_monday + timedelta(days=6)
+        cur_week_str = current_monday.isoformat()
         today_str = today.isoformat()
 
         for event in events:
             if not event.get("week_start") or event.get("event_date"):
                 continue
-            if event["week_start"] != week_start_str:
-                continue
             if staff["display_name"] != event["staff_name"]:
                 continue
-            if await db.is_weekly_complete(staff["chat_id"], week_start_str, event["title"], event["cohort"]):
-                continue
-            if await db.weekly_reminder_sent_today(staff["chat_id"], today_str, event["title"], event["cohort"]):
-                continue
 
-            text = format_weekly_task_reminder(event)
-            keyboard = InlineKeyboardMarkup([[
-                InlineKeyboardButton("✅ Done", callback_data=f"wc:{event['id']}")
-            ]])
+            if event.get("type") == "consult":
+                # Upcoming (next-week) consults only.
+                ws = event["week_start"]
+                if not (next_monday.isoformat() <= ws <= next_sunday.isoformat()):
+                    continue
+                # Already set or refreshed a link for this cohort this week? Don't nag.
+                upd = link_updated.get((staff["display_name"], event["cohort"]), "")
+                if upd[:10] >= cur_week_str:
+                    continue
+                if await db.weekly_reminder_sent_today(staff["chat_id"], today_str, event["title"], event["cohort"]):
+                    continue
+                d = date.fromisoformat(ws)
+                text = msg.WEEKLY_CONSULT_SET_LINK.format(
+                    cohort=_e(event["cohort"]),
+                    date=d.strftime("%B %-d"),
+                )
+                keyboard = InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔗 Set Link", callback_data=f"slset:{event['cohort']}")
+                ]])
+            else:
+                # Generic weekly task — current week, 'tap Done'.
+                if event["week_start"] != cur_week_str:
+                    continue
+                if await db.is_weekly_complete(staff["chat_id"], cur_week_str, event["title"], event["cohort"]):
+                    continue
+                if await db.weekly_reminder_sent_today(staff["chat_id"], today_str, event["title"], event["cohort"]):
+                    continue
+                text = format_weekly_task_reminder(event)
+                keyboard = InlineKeyboardMarkup([[
+                    InlineKeyboardButton("✅ Done", callback_data=f"wc:{event['id']}")
+                ]])
+
             try:
                 await bot.send_message(
                     chat_id=staff["chat_id"],
@@ -267,7 +302,10 @@ async def send_weekly_task_reminders(bot: Bot) -> None:
                     reply_markup=keyboard,
                 )
                 await db.log_weekly_reminder(staff["chat_id"], today_str, event["title"], event["cohort"])
-                logger.info("Sent weekly task reminder for event %d to chat %d", event["id"], staff["chat_id"])
+                logger.info(
+                    "Sent weekly %s reminder to chat %d (%s)",
+                    event.get("type"), staff["chat_id"], event["cohort"],
+                )
             except TelegramError as e:
                 logger.error("Failed to send weekly reminder to %d: %s", staff["chat_id"], e)
 
@@ -574,41 +612,6 @@ async def check_skipped_responses(bot: Bot) -> None:
                 logger.exception("Failed to refresh HW stats after skip logging")
 
 
-async def send_weekly_consult_links(bot: Bot) -> None:
-    """Every Monday: post each staff member's consultation link to the relevant group chat."""
-    today = datetime.now(TZ).date()
-    week_start_str = today.isoformat()
-
-    group_chats = await db.get_all_group_chats()
-    links = await db.get_all_consult_links()
-    events = await db.get_all_events()
-
-    active_pairs: set[tuple[str, str]] = {
-        (e["staff_name"], e["cohort"])
-        for e in events
-        if e.get("week_start") == week_start_str and e.get("type") == "consult"
-    }
-
-    for entry in links:
-        pair = (entry["staff_name"], entry["cohort"])
-        if pair not in active_pairs:
-            continue
-        group_id = group_chats.get(entry["cohort"])
-        if not group_id:
-            logger.warning("No group chat configured for cohort %r — skipping link post", entry["cohort"])
-            continue
-        text = msg.CONSULT_LINK_POST.format(
-            staff=_e(entry["staff_name"]),
-            cohort=_e(entry["cohort"]),
-            link=entry["link"],
-        )
-        try:
-            await bot.send_message(chat_id=group_id, text=text, parse_mode="HTML")
-            logger.info("Posted consult link for %s / %s to group %d", entry["staff_name"], entry["cohort"], group_id)
-        except TelegramError as e:
-            logger.error("Failed to post consult link to group %d: %s", group_id, e)
-
-
 async def sync_schedule(bot: Bot) -> None:
     """Re-fetch Google Sheets and replace events in DB."""
     from sheets_parser import fetch_all_events
@@ -679,18 +682,7 @@ async def init_scheduler(bot: Bot) -> None:
         id="sheet_sync",
         replace_existing=True,
     )
-    scheduler.add_job(
-        send_weekly_consult_links,
-        trigger="cron",
-        day_of_week="mon",
-        hour=9,
-        minute=0,
-        timezone=TZ,
-        kwargs={"bot": bot},
-        id="weekly_consult_links",
-        replace_existing=True,
-    )
-    # Runs every minute; fires at 10:00 local time in each recipient's own zone.
+    # Runs every minute; fires at Saturday 17:00 local time in each recipient's own zone.
     scheduler.add_job(
         send_weekly_task_reminders,
         trigger="interval",

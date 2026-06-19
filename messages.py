@@ -119,11 +119,12 @@ SETLINK_CHOOSE_COHORT = "🔗 Choose a cohort to set your consultation link for:
 SETLINK_ENTER_LINK = "Send your consultation link for <b>{cohort}</b>:"
 SETLINK_SAVED = "✅ Consultation link saved for <b>{cohort}</b>."
 SETLINK_NO_COHORTS = "No consultation events found for you in the schedule."
-CONSULT_LINK_POST = (
-    "🔗 <b>Consultation link</b>\n"
-    "<blockquote>👤 {staff}\n"
-    "👥 {cohort}\n"
-    "🌐 {link}</blockquote>"
+WEEKLY_CONSULT_SET_LINK = (
+    "🔗 <b>Set your consultation link</b>\n"
+    "<blockquote>👥 {cohort}\n"
+    "📅 Week of {date}</blockquote>\n\n"
+    "You have consultations coming up next week. Tap below to set your booking link — "
+    "I'll post it to the group right away so they can book."
 )
 CONSULT_LINK_BOOK_NOW = (
     "📅 <b>Hey, book your meetings now!</b>\n"

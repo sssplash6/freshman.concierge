@@ -413,6 +413,31 @@ async def cmd_setlink(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     return SETLINK_COHORT
 
 
+async def cb_setlink_from_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Entry point for the 'Set Link' button on the weekly consult reminder.
+
+    The cohort is already known (encoded in the callback), so we skip cohort
+    selection and go straight to asking for the link.
+    """
+    query = update.callback_query
+    if not query:
+        return ConversationHandler.END
+    await query.answer()
+
+    staff = await db.get_staff(query.from_user.id)
+    if not staff:
+        await query.edit_message_text(msg.NOT_REGISTERED)
+        return ConversationHandler.END
+
+    cohort = query.data[len("slset:"):]
+    context.user_data["setlink_cohort"] = cohort
+    await query.edit_message_text(
+        msg.SETLINK_ENTER_LINK.format(cohort=_e(cohort)),
+        parse_mode="HTML",
+    )
+    return SETLINK_URL
+
+
 async def cb_setlink_cohort(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     if not query:
@@ -1411,6 +1436,7 @@ def build_app() -> Application:
         entry_points=[
             CommandHandler("setlink", cmd_setlink),
             MessageHandler(filters.Text(["🔗 Set Link"]), cmd_setlink),
+            CallbackQueryHandler(cb_setlink_from_reminder, pattern=r"^slset:"),
         ],
         states={
             SETLINK_COHORT: [CallbackQueryHandler(cb_setlink_cohort, pattern=r"^sl:")],
