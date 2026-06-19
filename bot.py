@@ -7,6 +7,7 @@ from datetime import date, timedelta
 _e = html.escape
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, Update
+from telegram.error import TelegramError
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -449,6 +450,35 @@ async def cb_setlink_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         msg.SETLINK_SAVED.format(cohort=_e(cohort)),
         parse_mode="HTML",
     )
+
+    # Auto-forward the link to the cohort's group chat with a booking nudge.
+    group_chats = await db.get_all_group_chats()
+    group_id = group_chats.get(cohort)
+    if not group_id:
+        await update.message.reply_text(
+            msg.SETLINK_NO_GROUP.format(cohort=_e(cohort)),
+            parse_mode="HTML",
+        )
+        return ConversationHandler.END
+
+    text = msg.CONSULT_LINK_BOOK_NOW.format(
+        staff=_e(staff["display_name"]),
+        cohort=_e(cohort),
+        link=link,
+    )
+    try:
+        await context.bot.send_message(chat_id=group_id, text=text, parse_mode="HTML")
+        await update.message.reply_text(
+            msg.SETLINK_FORWARDED.format(cohort=_e(cohort)),
+            parse_mode="HTML",
+        )
+        logger.info("Forwarded consult link for %s / %s to group %d", staff["display_name"], cohort, group_id)
+    except TelegramError as e:
+        logger.error("Failed to forward consult link to group %d: %s", group_id, e)
+        await update.message.reply_text(
+            msg.SETLINK_NO_GROUP.format(cohort=_e(cohort)),
+            parse_mode="HTML",
+        )
     return ConversationHandler.END
 
 

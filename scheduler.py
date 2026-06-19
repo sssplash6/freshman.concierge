@@ -222,18 +222,18 @@ def format_weekly_task_reminder(event: dict) -> str:
 
 
 async def send_weekly_task_reminders(bot: Bot) -> None:
-    """Daily 10:00 nudge (in each recipient's own zone) for pending weekly tasks.
+    """Weekly Saturday 17:00 nudge (in each recipient's own zone) for pending weekly tasks.
 
-    Runs on a 60-second interval; the per-staff local 10:00–10:30 window plus the
-    once-per-day idempotency key keep it to a single send per task per day.
+    Runs on a 60-second interval; the per-staff local Saturday 17:00–17:30 window plus the
+    once-per-day idempotency key keep it to a single send per task per week.
     """
     events = await db.get_all_events()
     staff_list = await db.get_all_staff()
 
     for staff in staff_list:
         now_local = datetime.now(staff_tz(staff))
-        # Only fire during the recipient's local 10:00–10:30 window.
-        if not (now_local.hour == 10 and now_local.minute < 30):
+        # Only fire during the recipient's local Saturday 17:00–17:30 window.
+        if not (now_local.weekday() == 5 and now_local.hour == 17 and now_local.minute < 30):
             continue
         today = now_local.date()
         week_start_str = (today - timedelta(days=today.weekday())).isoformat()

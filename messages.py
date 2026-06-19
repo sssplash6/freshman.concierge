@@ -125,6 +125,17 @@ CONSULT_LINK_POST = (
     "👥 {cohort}\n"
     "🌐 {link}</blockquote>"
 )
+CONSULT_LINK_BOOK_NOW = (
+    "📅 <b>Hey, book your meetings now!</b>\n"
+    "<blockquote>👤 {staff}\n"
+    "👥 {cohort}\n"
+    "🌐 {link}</blockquote>"
+)
+SETLINK_FORWARDED = "📣 Posted to the <b>{cohort}</b> group chat."
+SETLINK_NO_GROUP = (
+    "⚠️ Saved, but no group chat is configured for <b>{cohort}</b>, "
+    "so I couldn't forward it. Ask an admin to run /setgroup."
+)
 
 SETGROUP_CHOOSE_COHORT = "🏘 Choose a cohort to assign a group chat to:"
 SETGROUP_ENTER_ID = (
