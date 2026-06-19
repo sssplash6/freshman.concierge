@@ -222,3 +222,4 @@ HW_CHECK = (
 HW_CHECK_YES_ACK = "✅ Noted — homework checked!"
 HW_CHECK_NO_PROMPT = "📝 Got it — why wasn't homework checked? Send a short reason."
 HW_CHECK_NO_ACK = "📋 Noted. Reason logged — don't forget to follow up."
+HW_CHECK_NOT_FOUND = "⚠️ This homework check is no longer available."

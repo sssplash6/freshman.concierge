@@ -487,6 +487,23 @@ async def get_event_by_id(event_id: int) -> dict | None:
         return dict(row) if row else None
 
 
+async def get_event_by_cohort_date(cohort: str, event_date: str) -> dict | None:
+    """Look up a lecture/seminar by its stable (cohort, event_date) key.
+
+    Event row IDs are reassigned on every sheet sync, so callbacks that must
+    survive a sync (e.g. HW check buttons) key on this instead of the volatile id.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM events WHERE cohort = ? AND event_date = ? "
+            "ORDER BY (type='lecture') DESC LIMIT 1",
+            (cohort, event_date),
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+
 async def is_weekly_complete(chat_id: int, week_start: str, title: str, cohort: str) -> bool:
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(

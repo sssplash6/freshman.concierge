@@ -1083,7 +1083,7 @@ async def cb_completion_reason(update: Update, context: ContextTypes.DEFAULT_TYP
     if pending.get("kind") == "hw_check":
         await db.log_hw_completion(
             pending["ta_name"], pending["chat_id"],
-            pending["cohort"], str(pending["event_id"]), False,
+            pending["cohort"], pending["event_date"], False,
         )
         row = [
             _dt.now(_tz.utc).strftime("%Y-%m-%d %H:%M UTC"),
@@ -1327,25 +1327,44 @@ async def _refresh_hw_stats() -> None:
     asyncio.create_task(asyncio.to_thread(write_hw_stats_tab, stats))
 
 
+async def _resolve_hw(payload: str) -> tuple[str | None, str, str]:
+    """Resolve an HW callback payload to (cohort, event_date, title).
+
+    New format is the stable 'cohort|event_date' key, which survives the event-id
+    churn of a sheet sync. Legacy format is a bare event id (buttons sent before
+    this fix); we resolve those by id while they're still in flight. Returns
+    (None, "", "") only when nothing can be resolved.
+    """
+    if "|" in payload:
+        cohort, _, event_date = payload.partition("|")
+        event = await db.get_event_by_cohort_date(cohort, event_date)
+        return cohort, event_date, (event["title"] if event else "")
+    if payload.isdigit():
+        event = await db.get_event_by_id(int(payload))
+        if event:
+            return event["cohort"], event.get("event_date", ""), event["title"]
+    return None, "", ""
+
+
 async def cb_hw_yes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if not query:
         return
     await query.answer()
-    event_id = int(query.data[7:])  # strip "hw:yes:"
-    event = await db.get_event_by_id(event_id)
-    if event:
-        await db.mark_hw_answered(event["cohort"], event.get("event_date", ""), query.from_user.id)
-        staff = await db.get_staff(query.from_user.id)
-        ta_name = staff["display_name"] if staff else "unknown"
-        await db.log_hw_completion(ta_name, query.from_user.id, event["cohort"], str(event_id), True)
-        row = [
-            _dt.now(_tz.utc).strftime("%Y-%m-%d %H:%M UTC"),
-            ta_name, event["cohort"], event["title"],
-            event.get("event_date", ""), "Yes", "",
-        ]
-        asyncio.create_task(asyncio.to_thread(append_hw_check_row, row))
-        asyncio.create_task(_refresh_hw_stats())
+    cohort, event_date, title = await _resolve_hw(query.data[7:])  # strip "hw:yes:"
+    if cohort is None:
+        await query.edit_message_text(msg.HW_CHECK_NOT_FOUND)
+        return
+    staff = await db.get_staff(query.from_user.id)
+    ta_name = staff["display_name"] if staff else "unknown"
+    await db.mark_hw_answered(cohort, event_date, query.from_user.id)
+    await db.log_hw_completion(ta_name, query.from_user.id, cohort, event_date, True)
+    row = [
+        _dt.now(_tz.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        ta_name, cohort, title, event_date, "Yes", "",
+    ]
+    asyncio.create_task(asyncio.to_thread(append_hw_check_row, row))
+    asyncio.create_task(_refresh_hw_stats())
     await query.edit_message_text(msg.HW_CHECK_YES_ACK)
 
 
@@ -1354,22 +1373,20 @@ async def cb_hw_no(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if not query:
         return ConversationHandler.END
     await query.answer()
-    event_id = int(query.data[6:])  # strip "hw:no:"
-    event = await db.get_event_by_id(event_id)
-    if not event:
-        await query.edit_message_text("HW check no longer found.")
+    cohort, event_date, title = await _resolve_hw(query.data[6:])  # strip "hw:no:"
+    if cohort is None:
+        await query.edit_message_text(msg.HW_CHECK_NOT_FOUND)
         return ConversationHandler.END
-    await db.mark_hw_answered(event["cohort"], event.get("event_date", ""), query.from_user.id)
+    await db.mark_hw_answered(cohort, event_date, query.from_user.id)
     staff = await db.get_staff(query.from_user.id)
     ta_name = staff["display_name"] if staff else "unknown"
     context.user_data["pending_completion"] = {
         "kind": "hw_check",
-        "event_id": event_id,
         "ta_name": ta_name,
         "chat_id": query.from_user.id,
-        "cohort": event["cohort"],
-        "title": event["title"],
-        "event_date": event.get("event_date", ""),
+        "cohort": cohort,
+        "title": title,
+        "event_date": event_date,
     }
     await query.edit_message_text(msg.HW_CHECK_NO_PROMPT)
     return AWAITING_REASON

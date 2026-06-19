@@ -499,9 +499,12 @@ async def check_hw_completion_checks(bot: Bot) -> None:
         if await db.hw_check_sent(cohort, event["event_date"], ta_staff["chat_id"]):
             continue
 
+        # Encode the stable (cohort, event_date) key, not event['id'] — row IDs are
+        # reassigned on every sheet sync, which would otherwise break the button.
+        hw_key = f"{cohort}|{event['event_date']}"
         keyboard = InlineKeyboardMarkup([[
-            InlineKeyboardButton("✅ Yes", callback_data=f"hw:yes:{event['id']}"),
-            InlineKeyboardButton("❌ No",  callback_data=f"hw:no:{event['id']}"),
+            InlineKeyboardButton("✅ Yes", callback_data=f"hw:yes:{hw_key}"),
+            InlineKeyboardButton("❌ No",  callback_data=f"hw:no:{hw_key}"),
         ]])
         text = msg.HW_CHECK.format(
             cohort=_e(cohort),
