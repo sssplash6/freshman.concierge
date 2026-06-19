@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Concierge Bot — TA Guide</title>
+<style>
+  :root{
+    --accent:#0d9488; --accent-2:#10b981;
+    --ink:#0f172a; --muted:#64748b; --line:#e8f0ee;
+    --card:#ffffff; --bg:#eaf4f1;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    color:var(--ink); line-height:1.55;
+    background:
+      radial-gradient(1200px 600px at 15% -10%, #ccfbef 0, transparent 55%),
+      radial-gradient(1000px 600px at 110% 10%, #d1fae5 0, transparent 50%),
+      var(--bg);
+    min-height:100vh; padding:40px 18px;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:760px;margin:0 auto}
+  .card{
+    background:var(--card); border-radius:22px; overflow:hidden;
+    box-shadow:0 22px 60px -28px rgba(15,23,42,.35), 0 1px 0 rgba(255,255,255,.7) inset;
+    border:1px solid rgba(255,255,255,.6);
+  }
+  .hero{
+    position:relative; padding:34px 34px 30px;
+    background:linear-gradient(135deg,var(--accent),var(--accent-2));
+    color:#fff;
+  }
+  .hero::after{
+    content:""; position:absolute; inset:0;
+    background:radial-gradient(420px 200px at 88% -40%, rgba(255,255,255,.28), transparent 60%);
+  }
+  .pill{
+    display:inline-flex; align-items:center; gap:7px;
+    font-size:12px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+    background:rgba(255,255,255,.18); border:1px solid rgba(255,255,255,.35);
+    padding:6px 13px; border-radius:999px; backdrop-filter:blur(4px); position:relative; z-index:1;
+  }
+  .hero h1{font-size:30px; font-weight:800; letter-spacing:-.02em; margin:16px 0 6px; position:relative; z-index:1}
+  .hero p{font-size:15.5px; opacity:.95; max-width:48ch; position:relative; z-index:1}
+  .body{padding:10px 26px 30px}
+  section{padding:22px 8px; border-bottom:1px solid var(--line)}
+  section:last-child{border-bottom:0}
+  .head{display:flex; align-items:center; gap:12px; margin-bottom:16px}
+  .ic{
+    flex:0 0 auto; width:40px; height:40px; border-radius:12px;
+    display:grid; place-items:center; font-size:20px;
+    background:linear-gradient(135deg, color-mix(in srgb,var(--accent) 14%,#fff), color-mix(in srgb,var(--accent-2) 16%,#fff));
+    border:1px solid var(--line);
+  }
+  .head h2{font-size:18px; font-weight:750; letter-spacing:-.01em}
+  .rows{list-style:none; display:grid; gap:10px}
+  .row{
+    display:grid; grid-template-columns:200px 1fr; gap:14px; align-items:baseline;
+    padding:12px 14px; border-radius:13px; background:#f7fbfa; border:1px solid var(--line);
+  }
+  .k{font-weight:700; font-size:14.5px}
+  .v{color:var(--muted); font-size:14.5px}
+  .tag{
+    display:inline-block; font-size:11px; font-weight:700; color:var(--accent);
+    background:color-mix(in srgb,var(--accent) 10%,#fff); border:1px solid color-mix(in srgb,var(--accent) 22%,#fff);
+    padding:2px 9px; border-radius:999px; margin-right:8px; white-space:nowrap;
+  }
+  .steps{counter-reset:s; list-style:none; display:grid; gap:11px}
+  .steps li{position:relative; padding:11px 14px 11px 50px; border-radius:13px; background:#f7fbfa; border:1px solid var(--line); font-size:14.5px}
+  .steps li::before{
+    counter-increment:s; content:counter(s);
+    position:absolute; left:12px; top:50%; transform:translateY(-50%);
+    width:26px; height:26px; border-radius:50%; display:grid; place-items:center;
+    font-size:13px; font-weight:800; color:#fff;
+    background:linear-gradient(135deg,var(--accent),var(--accent-2));
+  }
+  .spot{
+    background:linear-gradient(135deg, color-mix(in srgb,var(--accent) 7%,#fff), color-mix(in srgb,var(--accent-2) 9%,#fff));
+    border:1px solid color-mix(in srgb,var(--accent) 20%,#fff); border-radius:16px; padding:18px 20px;
+  }
+  .spot .q{font-size:16px; font-weight:750; margin-bottom:6px}
+  .spot .when{display:inline-block; font-size:12px; font-weight:700; color:var(--accent); margin-bottom:12px}
+  .spot ul{list-style:none; display:grid; gap:8px}
+  .spot li{position:relative; padding-left:24px; font-size:14.5px}
+  .spot li::before{content:"›"; position:absolute; left:6px; top:-1px; font-weight:800; color:var(--accent)}
+  .spot .note{margin-top:12px; font-size:13px; color:var(--muted)}
+  .tips{background:linear-gradient(135deg,#f4fbf9,#eefbf6); border:1px solid var(--line); border-radius:14px; padding:16px 18px}
+  .tips ul{list-style:none; display:grid; gap:9px}
+  .tips li{position:relative; padding-left:26px; font-size:14.5px; color:#334155}
+  .tips li::before{content:"💡"; position:absolute; left:0; top:0}
+  .foot{text-align:center; color:var(--muted); font-size:12.5px; padding:18px 0 2px}
+  @media(max-width:540px){
+    .row{grid-template-columns:1fr; gap:3px}
+    .hero{padding:26px 22px}
+    .hero h1{font-size:25px}
+    .body{padding:6px 14px 22px}
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="hero">
+        <span class="pill">🎓 TA Guide</span>
+        <h1>Concierge Bot</h1>
+        <p>Your assistant for homework checks and reminders. Every time is shown in <strong>your</strong> timezone.</p>
+      </div>
+
+      <div class="body">
+        <section>
+          <div class="head"><span class="ic">🚀</span><h2>Getting started</h2></div>
+          <ol class="steps">
+            <li>Open the bot and tap <strong>/start</strong>.</li>
+            <li>Enter your timezone (e.g. <strong>GMT+5</strong>, <strong>+3</strong>, or <strong>Asia/Tashkent</strong>) and confirm.</li>
+            <li>You're registered — re-run <strong>/start</strong> anytime to change your timezone.</li>
+          </ol>
+        </section>
+
+        <section>
+          <div class="head"><span class="ic">📚</span><h2>Your main job: homework checks</h2></div>
+          <div class="spot">
+            <div class="q">"Did you check homework for this session?"</div>
+            <span class="when">⏱ Arrives 3 days after each lecture/seminar in your assigned cohort</span>
+            <ul>
+              <li>Tap <strong>✅ Yes</strong> when it's done.</li>
+              <li>Tap <strong>❌ No</strong>, then type a short reason.</li>
+            </ul>
+            <div class="note">Your response rate (✅ vs ❌) is tracked automatically — no extra steps.</div>
+          </div>
+        </section>
+
+        <section>
+          <div class="head"><span class="ic">🎛</span><h2>Your menu buttons</h2></div>
+          <ul class="rows">
+            <li class="row"><span class="k">📅 My Schedule</span><span class="v">Your next upcoming sessions.</span></li>
+            <li class="row"><span class="k">🔗 Set Link</span><span class="v">Save a booking link for a cohort (if you run consults).</span></li>
+            <li class="row"><span class="k">🌍 Timezone</span><span class="v">Change the timezone all your times are shown in.</span></li>
+          </ul>
+        </section>
+
+        <section>
+          <div class="head"><span class="ic">🔔</span><h2>Other nudges you may get</h2></div>
+          <ul class="rows">
+            <li class="row"><span class="k">Task check-in 📌</span><span class="v"><span class="tag">at deadline</span>If Sega assigns you a task: tap <strong>Yes</strong>/<strong>No</strong> (No → short reason).</span></li>
+            <li class="row"><span class="k">Completion check ✅❌</span><span class="v"><span class="tag">2h after</span>For a session you run: tap <strong>Yes</strong>/<strong>No</strong> (No → reason).</span></li>
+          </ul>
+        </section>
+
+        <section>
+          <div class="head"><span class="ic">✨</span><h2>Tips</h2></div>
+          <div class="tips">
+            <ul>
+              <li>Set your timezone once — every time then shows local to you.</li>
+              <li>Homework checks arrive <strong>3 days after</strong> the session — check on time.</li>
+              <li>"No" always asks for a one-line reason — keep it short.</li>
+              <li>Lost? Tap <strong>/menu</strong> to bring the buttons back.</li>
+            </ul>
+          </div>
+        </section>
+      </div>
+    </div>
+    <p class="foot">AP Team · Concierge Bot</p>
+  </div>
+</body>
+</html>

@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Concierge Bot — Owner Guide</title>
+<style>
+  :root{
+    --accent:#b45309; --accent-2:#f59e0b;
+    --ink:#1c1917; --muted:#78716c; --line:#efe9e1;
+    --card:#ffffff; --bg:#f5efe6;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    color:var(--ink); line-height:1.55;
+    background:
+      radial-gradient(1200px 600px at 15% -10%, #fde9c8 0, transparent 55%),
+      radial-gradient(1000px 600px at 110% 10%, #fef3c7 0, transparent 50%),
+      var(--bg);
+    min-height:100vh; padding:40px 18px;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:780px;margin:0 auto}
+  .card{
+    background:var(--card); border-radius:22px; overflow:hidden;
+    box-shadow:0 22px 60px -28px rgba(28,25,23,.4), 0 1px 0 rgba(255,255,255,.7) inset;
+    border:1px solid rgba(255,255,255,.6);
+  }
+  .hero{
+    position:relative; padding:34px 34px 30px;
+    background:linear-gradient(135deg,#7c2d12,var(--accent) 55%,var(--accent-2));
+    color:#fff;
+  }
+  .hero::after{
+    content:""; position:absolute; inset:0;
+    background:radial-gradient(420px 200px at 88% -40%, rgba(255,255,255,.3), transparent 60%);
+  }
+  .pill{
+    display:inline-flex; align-items:center; gap:7px;
+    font-size:12px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+    background:rgba(255,255,255,.18); border:1px solid rgba(255,255,255,.38);
+    padding:6px 13px; border-radius:999px; backdrop-filter:blur(4px); position:relative; z-index:1;
+  }
+  .hero h1{font-size:30px; font-weight:800; letter-spacing:-.02em; margin:16px 0 6px; position:relative; z-index:1}
+  .hero p{font-size:15.5px; opacity:.96; max-width:50ch; position:relative; z-index:1}
+  .body{padding:10px 26px 30px}
+  section{padding:22px 8px; border-bottom:1px solid var(--line)}
+  section:last-child{border-bottom:0}
+  .head{display:flex; align-items:center; gap:12px; margin-bottom:16px}
+  .ic{
+    flex:0 0 auto; width:40px; height:40px; border-radius:12px;
+    display:grid; place-items:center; font-size:20px;
+    background:linear-gradient(135deg, color-mix(in srgb,var(--accent) 12%,#fff), color-mix(in srgb,var(--accent-2) 18%,#fff));
+    border:1px solid var(--line);
+  }
+  .head h2{font-size:18px; font-weight:750; letter-spacing:-.01em}
+  .rows{list-style:none; display:grid; gap:10px}
+  .row{
+    display:grid; grid-template-columns:210px 1fr; gap:14px; align-items:baseline;
+    padding:12px 14px; border-radius:13px; background:#faf7f2; border:1px solid var(--line);
+  }
+  .k{font-weight:700; font-size:14.5px}
+  .cmd{display:block; font-size:12px; font-weight:600; color:var(--accent); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; margin-top:2px}
+  .v{color:var(--muted); font-size:14.5px}
+  .own{display:inline-block; font-size:10.5px; font-weight:800; letter-spacing:.04em; text-transform:uppercase; color:#fff; background:linear-gradient(135deg,var(--accent),var(--accent-2)); padding:2px 8px; border-radius:999px; margin-left:6px; vertical-align:middle}
+  .flow{list-style:none; display:grid; gap:9px}
+  .flow li{position:relative; padding:10px 14px 10px 30px; border-radius:12px; background:#faf7f2; border:1px solid var(--line); font-size:14px}
+  .flow li::before{content:"●"; position:absolute; left:12px; top:11px; font-size:9px; color:var(--accent-2)}
+  .flow b{font-weight:700}
+  .sheets{display:grid; gap:10px}
+  .sheet{padding:13px 16px; border-radius:13px; border:1px solid var(--line); background:linear-gradient(135deg,#fffaf2,#fef6e9)}
+  .sheet .t{font-weight:750; font-size:14.5px; margin-bottom:2px}
+  .sheet .d{color:var(--muted); font-size:13.5px}
+  .tips{background:linear-gradient(135deg,#fff9f0,#fef4e2); border:1px solid var(--line); border-radius:14px; padding:16px 18px}
+  .tips ul{list-style:none; display:grid; gap:9px}
+  .tips li{position:relative; padding-left:26px; font-size:14.5px; color:#44403c}
+  .tips li::before{content:"💡"; position:absolute; left:0; top:0}
+  .foot{text-align:center; color:var(--muted); font-size:12.5px; padding:18px 0 2px}
+  @media(max-width:560px){
+    .row{grid-template-columns:1fr; gap:3px}
+    .hero{padding:26px 22px}
+    .hero h1{font-size:25px}
+    .body{padding:6px 14px 22px}
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="hero">
+        <span class="pill">👑 Owner Guide · Sega</span>
+        <h1>Concierge Bot</h1>
+        <p>Full control of the team — schedule, reminders, tasks, TAs, and broadcasts. Owner-only powers are locked to your account.</p>
+      </div>
+
+      <div class="body">
+        <section>
+          <div class="head"><span class="ic">🎛</span><h2>Main menu</h2></div>
+          <ul class="rows">
+            <li class="row"><span class="k">📅 My Schedule<span class="cmd">/upcoming</span></span><span class="v">Your next upcoming sessions.</span></li>
+            <li class="row"><span class="k">📣 Remind<span class="cmd">/remind</span></span><span class="v">Pick a staff member → pick a session → send them a reminder now.</span></li>
+            <li class="row"><span class="k">📝 Assign Task<span class="cmd">/task</span></span><span class="v">Assign a custom task with a deadline to any staff member.<span class="own">Owner</span></span></li>
+            <li class="row"><span class="k">📢 Broadcast<span class="cmd">/broadcast</span></span><span class="v">Send one message to <strong>all</strong> registered staff.<span class="own">Owner</span></span></li>
+            <li class="row"><span class="k">⚙️ Settings</span><span class="v">Opens the settings menu below.</span></li>
+          </ul>
+        </section>
+
+        <section>
+          <div class="head"><span class="ic">⚙️</span><h2>Settings menu</h2></div>
+          <ul class="rows">
+            <li class="row"><span class="k">🔄 Reload<span class="cmd">/reload</span></span><span class="v">Re-sync the schedule from Google Sheets; offers to notify affected staff.</span></li>
+            <li class="row"><span class="k">📊 Sync Status<span class="cmd">/sync_status</span></span><span class="v">Last sync time and event count.</span></li>
+            <li class="row"><span class="k">🎓 Assign TA<span class="cmd">/assignta</span></span><span class="v">Assign a TA to a cohort → drives that cohort's homework checks.</span></li>
+            <li class="row"><span class="k">➕ Add TA<span class="cmd">/addta</span></span><span class="v">Register a new TA (name + Telegram ID).</span></li>
+            <li class="row"><span class="k">🔗 Set Link<span class="cmd">/setlink</span></span><span class="v">Save a consult booking link for a cohort.</span></li>
+            <li class="row"><span class="k">🌍 Timezone<span class="cmd">/timezone</span></span><span class="v">Change your display timezone.</span></li>
+          </ul>
+        </section>
+
+        <section>
+          <div class="head"><span class="ic">⌨️</span><h2>Extra commands (type them)</h2></div>
+          <ul class="rows">
+            <li class="row"><span class="k"><span class="cmd">/setgroup</span></span><span class="v">Map a cohort → its group chat ID (so consult links auto-post there).</span></li>
+            <li class="row"><span class="k"><span class="cmd">/listgroups</span></span><span class="v">List all cohort → group chat mappings.</span></li>
+            <li class="row"><span class="k"><span class="cmd">/clearlinks</span></span><span class="v">Wipe all saved consult links.</span></li>
+            <li class="row"><span class="k"><span class="cmd">/testlog</span></span><span class="v">Write a test row to the completions sheet (health check).</span></li>
+          </ul>
+        </section>
+
+        <section>
+          <div class="head"><span class="ic">🗓</span><h2>Runs automatically</h2></div>
+          <ul class="flow">
+            <li><b>Reminders</b> — 1h before lectures; 10:00 AM for consults (each in the recipient's zone).</li>
+            <li><b>Completion checks</b> — 2h after every session (Yes/No → reason).</li>
+            <li><b>Task check-ins</b> — pre-deadline heads-up + a Yes/No at the deadline.</li>
+            <li><b>Weekly Saturday 5 PM nudge</b> — set next week's link, or "Done" weekly tasks.</li>
+            <li><b>Homework checks</b> — 3 days after each lecture/seminar, sent to the cohort's TA.</li>
+            <li><b>Auto-skip</b> — any check-in left unanswered for 24h is logged as <em>Skipped</em>.</li>
+            <li><b>Schedule sync</b> — pulls Google Sheets every few hours.</li>
+          </ul>
+        </section>
+
+        <section>
+          <div class="head"><span class="ic">📊</span><h2>Logged in Google Sheets</h2></div>
+          <div class="sheets">
+            <div class="sheet"><div class="t">Completions Log + Dashboard</div><div class="d">Session &amp; weekly-task Yes/No/Skipped, with rollups per staff.</div></div>
+            <div class="sheet"><div class="t">HW Checks Log + TA HW Stats</div><div class="d">Homework check results and each TA's completion rate.</div></div>
+            <div class="sheet"><div class="t">Tasks Log</div><div class="d">Every task you assign and its outcome (Assigned → Done / Not done / Skipped).</div></div>
+          </div>
+        </section>
+
+        <section>
+          <div class="head"><span class="ic">✨</span><h2>Tips</h2></div>
+          <div class="tips">
+            <ul>
+              <li><strong>Assign Task</strong> and <strong>Broadcast</strong> are yours alone — no other account can use them.</li>
+              <li>After editing the Google Sheet, tap <strong>🔄 Reload</strong> to push changes live and notify affected staff.</li>
+              <li>Homework checks only fire for cohorts that have a TA assigned — use <strong>🎓 Assign TA</strong> first.</li>
+              <li>Set a cohort's group with <strong>/setgroup</strong> so booking links post automatically.</li>
+            </ul>
+          </div>
+        </section>
+      </div>
+    </div>
+    <p class="foot">AP Team · Concierge Bot</p>
+  </div>
+</body>
+</html>
