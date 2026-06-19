@@ -606,7 +606,8 @@ def _deadline_presets() -> list[tuple[str, str, object]]:
 async def cmd_task(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if not update.effective_user or not update.message:
         return ConversationHandler.END
-    if update.effective_user.id not in REMIND_IDS and update.effective_user.id != ADMIN_CHAT_ID:
+    # Sega-exclusive: assigning tasks is restricted to the owner.
+    if update.effective_user.id not in REMIND_IDS:
         await update.message.reply_text(msg.ADMIN_ONLY)
         return ConversationHandler.END
 
@@ -869,7 +870,8 @@ async def cb_task_no(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if not update.effective_user or not update.message:
         return ConversationHandler.END
-    if update.effective_user.id not in REMIND_IDS and update.effective_user.id != ADMIN_CHAT_ID:
+    # Sega-exclusive: broadcasting to all staff is restricted to the owner.
+    if update.effective_user.id not in REMIND_IDS:
         await update.message.reply_text(msg.ADMIN_ONLY)
         return ConversationHandler.END
     await update.message.reply_text(msg.BROADCAST_PROMPT)
