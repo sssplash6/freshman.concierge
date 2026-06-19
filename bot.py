@@ -976,6 +976,7 @@ async def cb_completion_yes(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     await query.answer()
 
     event_id = int(query.data[8:])  # strip "cc:yes:"
+    await db.mark_completion_answered(event_id, query.from_user.id)
     event = await db.get_event_by_id(event_id)
     if event:
         await db.log_completion(
@@ -1005,6 +1006,7 @@ async def cb_completion_no(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await query.answer()
 
     event_id = int(query.data[7:])  # strip "cc:no:"
+    await db.mark_completion_answered(event_id, query.from_user.id)
     event = await db.get_event_by_id(event_id)
     if not event:
         await query.edit_message_text("Event no longer found.")
@@ -1308,6 +1310,7 @@ async def cb_hw_yes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     event_id = int(query.data[7:])  # strip "hw:yes:"
     event = await db.get_event_by_id(event_id)
     if event:
+        await db.mark_hw_answered(event["cohort"], event.get("event_date", ""), query.from_user.id)
         staff = await db.get_staff(query.from_user.id)
         ta_name = staff["display_name"] if staff else "unknown"
         await db.log_hw_completion(ta_name, query.from_user.id, event["cohort"], str(event_id), True)
@@ -1331,6 +1334,7 @@ async def cb_hw_no(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if not event:
         await query.edit_message_text("HW check no longer found.")
         return ConversationHandler.END
+    await db.mark_hw_answered(event["cohort"], event.get("event_date", ""), query.from_user.id)
     staff = await db.get_staff(query.from_user.id)
     ta_name = staff["display_name"] if staff else "unknown"
     context.user_data["pending_completion"] = {

@@ -1,4 +1,5 @@
 # scheduler.py
+import asyncio
 import html
 import logging
 import os
@@ -24,6 +25,9 @@ TZ = pytz.timezone(DEFAULT_TZ)
 # nudges (see staff_tz / compute_reminder_dt).
 SOURCE_TZ = TZ
 _scheduler: AsyncIOScheduler | None = None
+
+# How long a check-in may sit unanswered before it's auto-logged as skipped.
+SKIP_BUFFER_HOURS = 24
 
 
 def staff_tz(staff: dict) -> pytz.BaseTzInfo:
@@ -360,7 +364,13 @@ async def send_completion_checks(bot: Bot) -> None:
                     parse_mode="HTML",
                     reply_markup=keyboard,
                 )
-                await db.mark_completion_prompt_sent(event["id"], staff["chat_id"])
+                await db.mark_completion_prompt_sent(
+                    event["id"], staff["chat_id"],
+                    staff_name=event["staff_name"],
+                    title=event["title"],
+                    cohort=event["cohort"],
+                    event_ref=event.get("event_date") or event.get("week_start", ""),
+                )
                 logger.info("Sent completion check for event %d to chat %d", event["id"], staff["chat_id"])
             except TelegramError as e:
                 logger.error("Failed to send completion check to %d: %s", staff["chat_id"], e)
@@ -474,6 +484,94 @@ async def check_hw_completion_checks(bot: Bot) -> None:
             )
         except TelegramError as e:
             logger.error("Failed to send HW check to TA %s: %s", ta_name, e)
+
+
+async def check_skipped_responses(bot: Bot) -> None:
+    """Auto-log any check-in left unanswered past the buffer window as 'Skipped'.
+
+    Covers the three Yes/No check-ins: event completion checks (lectures /
+    seminars / timed consults), TA homework checks, and Sega's custom tasks.
+    Each item is logged exactly once — the sweep marks it answered/resolved
+    immediately after, so it won't fire again.
+    """
+    from sheets_parser import append_completion_row, append_hw_check_row, write_hw_stats_tab
+
+    now = datetime.now(timezone.utc)
+    cutoff = (now - timedelta(hours=SKIP_BUFFER_HOURS)).isoformat()
+    ts = now.strftime("%Y-%m-%d %H:%M UTC")
+    reason = f"No response within {SKIP_BUFFER_HOURS}h (auto-skipped)"
+
+    # 1) Event completion checks — metadata is snapshotted at send time, so this
+    #    survives the event-id churn from sheet re-syncs.
+    for p in await db.get_unanswered_completion_prompts(cutoff):
+        await db.log_completion(
+            type="event",
+            staff_name=p.get("staff_name") or "",
+            chat_id=p["chat_id"],
+            title=p.get("title") or "",
+            cohort=p.get("cohort") or "",
+            event_ref=p.get("event_ref") or "",
+            completed=False,
+            reason=reason,
+        )
+        row = [ts, p.get("staff_name") or "", "Event",
+               p.get("title") or "", p.get("cohort") or "",
+               p.get("event_ref") or "", "Skipped", reason]
+        try:
+            await asyncio.to_thread(append_completion_row, row)
+        except Exception:
+            logger.exception("Failed to log skipped completion check to sheet")
+        await db.mark_completion_answered(p["event_id"], p["chat_id"])
+        logger.info("Logged skipped completion check (event_id=%s chat=%s)", p["event_id"], p["chat_id"])
+
+    # 2) Custom tasks assigned by Sega.
+    for task in await db.get_skippable_tasks(cutoff):
+        await db.set_task_result(task["id"], False, reason)
+        await db.log_completion(
+            type="custom_task",
+            staff_name=task["staff_name"],
+            chat_id=0,
+            title=task["description"],
+            cohort="—",
+            event_ref=task["deadline"],
+            completed=False,
+            reason=reason,
+        )
+        row = [ts, task["staff_name"], "Custom Task",
+               task["description"], "—",
+               format_task_deadline(task["deadline"], SOURCE_TZ),
+               "Skipped", reason]
+        try:
+            await asyncio.to_thread(append_completion_row, row)
+        except Exception:
+            logger.exception("Failed to log skipped task to sheet")
+        logger.info("Logged skipped task id=%s", task["id"])
+
+    # 3) TA homework checks — keyed on stable (cohort, event_date).
+    hw_unanswered = await db.get_unanswered_hw_prompts(cutoff)
+    if hw_unanswered:
+        events = await db.get_all_events()
+        staff_list = await db.get_all_staff()
+        title_by_key = {(e["cohort"], e.get("event_date")): e.get("title", "") for e in events}
+        name_by_chat = {s["chat_id"]: s["display_name"] for s in staff_list}
+        logged_any = False
+        for p in hw_unanswered:
+            ta_name = name_by_chat.get(p["chat_id"], "unknown")
+            title = title_by_key.get((p["cohort"], p["event_date"]), "")
+            await db.log_hw_completion(ta_name, p["chat_id"], p["cohort"], p["event_date"], False)
+            row = [ts, ta_name, p["cohort"], title, p["event_date"], "Skipped", reason]
+            try:
+                await asyncio.to_thread(append_hw_check_row, row)
+            except Exception:
+                logger.exception("Failed to log skipped HW check to sheet")
+            await db.mark_hw_answered(p["cohort"], p["event_date"], p["chat_id"])
+            logged_any = True
+            logger.info("Logged skipped HW check (cohort=%s date=%s chat=%s)", p["cohort"], p["event_date"], p["chat_id"])
+        if logged_any:
+            try:
+                await asyncio.to_thread(write_hw_stats_tab, await db.get_hw_stats())
+            except Exception:
+                logger.exception("Failed to refresh HW stats after skip logging")
 
 
 async def send_weekly_consult_links(bot: Bot) -> None:
@@ -607,6 +705,16 @@ async def init_scheduler(bot: Bot) -> None:
         seconds=60,
         kwargs={"bot": bot},
         id="hw_completion_checks",
+        replace_existing=True,
+    )
+    # Sweep for check-ins left unanswered past the buffer; logs them as skipped.
+    # Not time-critical (24h buffer), so a 10-minute cadence is plenty.
+    scheduler.add_job(
+        check_skipped_responses,
+        trigger="interval",
+        seconds=600,
+        kwargs={"bot": bot},
+        id="skipped_responses",
         replace_existing=True,
     )
     if not scheduler.running:

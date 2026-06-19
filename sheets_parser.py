@@ -293,11 +293,19 @@ def _setup_log_sheet(ws) -> None:
     sh.batch_update({"requests": requests})
 
 
-def _format_log_row(ws, row_idx: int, completed: bool) -> None:
+def _status_colors(status: str):
+    """(row background, badge background) for a 'Yes' / 'No' / 'Skipped' status."""
+    if status == "Yes":
+        return _rgb(0.851, 0.957, 0.851), _rgb(0.204, 0.659, 0.325)
+    if status == "Skipped":
+        return _rgb(1.0, 0.953, 0.831), _rgb(0.953, 0.612, 0.071)  # amber
+    return _rgb(0.988, 0.894, 0.882), _rgb(0.820, 0.165, 0.118)  # No / red
+
+
+def _format_log_row(ws, row_idx: int, status: str) -> None:
     sid = ws.id
     i = row_idx - 1  # 0-based
-    row_bg = _rgb(0.851, 0.957, 0.851) if completed else _rgb(0.988, 0.894, 0.882)
-    badge_bg = _rgb(0.204, 0.659, 0.325) if completed else _rgb(0.820, 0.165, 0.118)
+    row_bg, badge_bg = _status_colors(status)
     ws.spreadsheet.batch_update({"requests": [
         {
             "repeatCell": {
@@ -369,7 +377,7 @@ def _setup_dashboard(sh) -> None:
     data.append([""])
     data.append(["Recent Non-Completions", "", "", "", "", ""])
     data.append([
-        f"=IFERROR(QUERY({log}!A:H,\"SELECT A,B,D,E,F,H WHERE G='No' ORDER BY A DESC LIMIT 15 LABEL A 'When',B 'Staff',D 'Title',E 'Cohort',F 'Date',H 'Reason'\",1),\"No non-completions yet\")",
+        f"=IFERROR(QUERY({log}!A:H,\"SELECT A,B,D,E,F,G,H WHERE G='No' OR G='Skipped' ORDER BY A DESC LIMIT 15 LABEL A 'When',B 'Staff',D 'Title',E 'Cohort',F 'Date',G 'Status',H 'Reason'\",1),\"No non-completions yet\")",
         "", "", "", "", "",
     ])
 
@@ -481,7 +489,7 @@ def append_completion_row(row: list) -> None:
         _setup_dashboard(sh)
 
     if row_idx:
-        _format_log_row(ws, row_idx, completed=(row[6] == "Yes"))
+        _format_log_row(ws, row_idx, status=row[6])
 
 
 def _setup_hw_log_sheet(ws) -> None:
@@ -532,11 +540,10 @@ def _setup_hw_log_sheet(ws) -> None:
     sh.batch_update({"requests": requests})
 
 
-def _format_hw_row(ws, row_idx: int, completed: bool) -> None:
+def _format_hw_row(ws, row_idx: int, status: str) -> None:
     sid = ws.id
     i = row_idx - 1
-    row_bg = _rgb(0.851, 0.957, 0.851) if completed else _rgb(0.988, 0.894, 0.882)
-    badge_bg = _rgb(0.204, 0.659, 0.325) if completed else _rgb(0.820, 0.165, 0.118)
+    row_bg, badge_bg = _status_colors(status)
     ws.spreadsheet.batch_update({"requests": [
         {
             "repeatCell": {
@@ -592,7 +599,7 @@ def append_hw_check_row(row: list) -> None:
         _setup_hw_log_sheet(ws)
 
     if row_idx:
-        _format_hw_row(ws, row_idx, completed=(row[5] == "Yes"))
+        _format_hw_row(ws, row_idx, status=row[5])
 
 
 _HW_STATS = "TA HW Stats"

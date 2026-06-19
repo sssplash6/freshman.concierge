@@ -161,6 +161,24 @@ async def init_db() -> None:
                 display_name TEXT NOT NULL
             )
         """)
+        # Migrations: add skip-tracking columns to the prompt tables if missing.
+        # sent_at lets the skip sweep know when the check-in went out; answered
+        # flips to 1 once the recipient taps a button (or the sweep logs a skip).
+        for _table in ("completion_prompts_sent", "hw_check_sent_v2"):
+            cur = await db.execute(f"PRAGMA table_info({_table})")
+            cols = [r[1] for r in await cur.fetchall()]
+            if "sent_at" not in cols:
+                await db.execute(f"ALTER TABLE {_table} ADD COLUMN sent_at TEXT")
+            if "answered" not in cols:
+                await db.execute(f"ALTER TABLE {_table} ADD COLUMN answered INTEGER NOT NULL DEFAULT 0")
+        # Event metadata snapshot — event IDs are reassigned on every sheet sync,
+        # so the skip sweep (runs ~24h later) can't rely on event_id still resolving.
+        cur = await db.execute("PRAGMA table_info(completion_prompts_sent)")
+        cpc = [r[1] for r in await cur.fetchall()]
+        for _col in ("staff_name", "title", "cohort", "event_ref"):
+            if _col not in cpc:
+                await db.execute(f"ALTER TABLE completion_prompts_sent ADD COLUMN {_col} TEXT")
+
         # Seed from env var only for cohorts not already in DB
         from config import COHORT_GROUP_CHATS as _env_chats
         for cohort, chat_id in _env_chats.items():
@@ -347,13 +365,46 @@ async def completion_prompt_sent(event_id: int, chat_id: int) -> bool:
         return await cursor.fetchone() is not None
 
 
-async def mark_completion_prompt_sent(event_id: int, chat_id: int) -> None:
+async def mark_completion_prompt_sent(
+    event_id: int,
+    chat_id: int,
+    staff_name: str = "",
+    title: str = "",
+    cohort: str = "",
+    event_ref: str = "",
+) -> None:
+    sent_at = datetime.now(timezone.utc).isoformat()
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "INSERT OR IGNORE INTO completion_prompts_sent (event_id, chat_id) VALUES (?,?)",
+            "INSERT OR IGNORE INTO completion_prompts_sent "
+            "(event_id, chat_id, sent_at, answered, staff_name, title, cohort, event_ref) "
+            "VALUES (?,?,?,0,?,?,?,?)",
+            (event_id, chat_id, sent_at, staff_name, title, cohort, event_ref),
+        )
+        await db.commit()
+
+
+async def mark_completion_answered(event_id: int, chat_id: int) -> None:
+    """Flag a completion check-in as answered so the skip sweep leaves it alone."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE completion_prompts_sent SET answered = 1 WHERE event_id = ? AND chat_id = ?",
             (event_id, chat_id),
         )
         await db.commit()
+
+
+async def get_unanswered_completion_prompts(cutoff_iso: str) -> list[dict]:
+    """Completion check-ins sent on/before cutoff that nobody has answered yet."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT event_id, chat_id, staff_name, title, cohort, event_ref "
+            "FROM completion_prompts_sent "
+            "WHERE answered = 0 AND sent_at IS NOT NULL AND sent_at <= ?",
+            (cutoff_iso,),
+        )
+        return [dict(r) for r in await cursor.fetchall()]
 
 
 async def log_completion(
@@ -541,6 +592,21 @@ async def set_task_result(task_id: int, completed: bool, reason: str | None = No
         await db.commit()
 
 
+async def get_skippable_tasks(cutoff_iso: str) -> list[dict]:
+    """Tasks whose check-in went out (checkin_sent) but went unanswered past cutoff.
+
+    Anchored on the deadline, which is when the check-in is sent.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM tasks "
+            "WHERE completed IS NULL AND checkin_sent = 1 AND deadline <= ?",
+            (cutoff_iso,),
+        )
+        return [dict(r) for r in await cursor.fetchall()]
+
+
 async def get_last_sync() -> dict | None:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
@@ -586,12 +652,35 @@ async def hw_check_sent(cohort: str, event_date: str, chat_id: int) -> bool:
 
 
 async def mark_hw_check_sent(cohort: str, event_date: str, chat_id: int) -> None:
+    sent_at = datetime.now(timezone.utc).isoformat()
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "INSERT OR IGNORE INTO hw_check_sent_v2 (cohort, event_date, chat_id) VALUES (?,?,?)",
+            "INSERT OR IGNORE INTO hw_check_sent_v2 (cohort, event_date, chat_id, sent_at, answered) VALUES (?,?,?,?,0)",
+            (cohort, event_date, chat_id, sent_at),
+        )
+        await db.commit()
+
+
+async def mark_hw_answered(cohort: str, event_date: str, chat_id: int) -> None:
+    """Flag a HW check-in as answered so the skip sweep leaves it alone."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE hw_check_sent_v2 SET answered = 1 WHERE cohort = ? AND event_date = ? AND chat_id = ?",
             (cohort, event_date, chat_id),
         )
         await db.commit()
+
+
+async def get_unanswered_hw_prompts(cutoff_iso: str) -> list[dict]:
+    """HW check-ins sent on/before cutoff that the TA hasn't answered yet."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT cohort, event_date, chat_id FROM hw_check_sent_v2 "
+            "WHERE answered = 0 AND sent_at IS NOT NULL AND sent_at <= ?",
+            (cutoff_iso,),
+        )
+        return [dict(r) for r in await cursor.fetchall()]
 
 
 async def log_hw_completion(
