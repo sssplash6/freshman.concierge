@@ -4,3 +4,4 @@ __pycache__/
 .pytest_cache/
 *.db
 *.pyc
+.DS_Store
