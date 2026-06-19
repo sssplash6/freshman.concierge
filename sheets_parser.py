@@ -237,6 +237,9 @@ _DASH = "Dashboard"
 _HW_LOG = "HW Checks Log"
 _HW_HEADERS = ["Timestamp", "TA Name", "Cohort", "Event Title", "Event Date", "Completed", "Reason"]
 
+_TASKS_LOG = "Tasks Log"
+_TASKS_HEADERS = ["Timestamp", "Assigned To", "Task", "Assigned By", "Deadline", "Status", "Reason"]
+
 
 def _rgb(r: float, g: float, b: float) -> dict:
     return {"red": r, "green": g, "blue": b}
@@ -294,12 +297,14 @@ def _setup_log_sheet(ws) -> None:
 
 
 def _status_colors(status: str):
-    """(row background, badge background) for a 'Yes' / 'No' / 'Skipped' status."""
-    if status == "Yes":
-        return _rgb(0.851, 0.957, 0.851), _rgb(0.204, 0.659, 0.325)
+    """(row background, badge background) for a status badge."""
+    if status in ("Yes", "Done"):
+        return _rgb(0.851, 0.957, 0.851), _rgb(0.204, 0.659, 0.325)  # green
     if status == "Skipped":
         return _rgb(1.0, 0.953, 0.831), _rgb(0.953, 0.612, 0.071)  # amber
-    return _rgb(0.988, 0.894, 0.882), _rgb(0.820, 0.165, 0.118)  # No / red
+    if status == "Assigned":
+        return _rgb(0.871, 0.918, 0.988), _rgb(0.149, 0.388, 0.922)  # blue
+    return _rgb(0.988, 0.894, 0.882), _rgb(0.820, 0.165, 0.118)  # No / Not done / red
 
 
 def _format_log_row(ws, row_idx: int, status: str) -> None:
@@ -600,6 +605,84 @@ def append_hw_check_row(row: list) -> None:
 
     if row_idx:
         _format_hw_row(ws, row_idx, status=row[5])
+
+
+def _setup_tasks_log_sheet(ws) -> None:
+    sid = ws.id
+    sh = ws.spreadsheet
+    # Column widths: Timestamp, Assigned To, Task, Assigned By, Deadline, Status, Reason
+    col_widths = [175, 130, 280, 120, 150, 110, 280]
+    requests = [
+        {
+            "repeatCell": {
+                "range": {"sheetId": sid, "startRowIndex": 0, "endRowIndex": 1,
+                          "startColumnIndex": 0, "endColumnIndex": 7},
+                "cell": {"userEnteredFormat": {
+                    "backgroundColor": _rgb(0.129, 0.196, 0.341),
+                    "textFormat": {"bold": True, "fontSize": 11,
+                                   "foregroundColor": _rgb(1, 1, 1)},
+                    "horizontalAlignment": "CENTER",
+                    "verticalAlignment": "MIDDLE",
+                }},
+                "fields": "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment)",
+            }
+        },
+        {
+            "updateSheetProperties": {
+                "properties": {"sheetId": sid,
+                               "gridProperties": {"frozenRowCount": 1}},
+                "fields": "gridProperties.frozenRowCount",
+            }
+        },
+        {
+            "updateDimensionProperties": {
+                "range": {"sheetId": sid, "dimension": "ROWS",
+                          "startIndex": 0, "endIndex": 1},
+                "properties": {"pixelSize": 36},
+                "fields": "pixelSize",
+            }
+        },
+    ]
+    for i, w in enumerate(col_widths):
+        requests.append({
+            "updateDimensionProperties": {
+                "range": {"sheetId": sid, "dimension": "COLUMNS",
+                          "startIndex": i, "endIndex": i + 1},
+                "properties": {"pixelSize": w},
+                "fields": "pixelSize",
+            }
+        })
+    sh.batch_update({"requests": requests})
+
+
+def append_task_row(row: list) -> None:
+    """Append a task lifecycle row (assignment or completion) to 'Tasks Log'."""
+    import gspread
+    from google.oauth2.service_account import Credentials
+    from config import GOOGLE_SERVICE_ACCOUNT_JSON, COMPLETIONS_SHEETS_ID
+
+    creds = Credentials.from_service_account_info(GOOGLE_SERVICE_ACCOUNT_JSON, scopes=_SCOPES)
+    gc = gspread.Client(auth=creds)
+    sh = gc.open_by_key(COMPLETIONS_SHEETS_ID)
+
+    is_new = False
+    try:
+        ws = sh.worksheet(_TASKS_LOG)
+    except gspread.exceptions.WorksheetNotFound:
+        ws = sh.add_worksheet(_TASKS_LOG, rows=2000, cols=len(_TASKS_HEADERS))
+        ws.append_row(_TASKS_HEADERS, value_input_option="USER_ENTERED")
+        is_new = True
+
+    result = ws.append_row(row, value_input_option="USER_ENTERED")
+    updated = result.get("updates", {}).get("updatedRange", "")
+    m = _re.search(r"[A-Z](\d+):", updated)
+    row_idx = int(m.group(1)) if m else None
+
+    if is_new:
+        _setup_tasks_log_sheet(ws)
+
+    if row_idx:
+        _format_hw_row(ws, row_idx, status=row[5])  # status badge in column F (index 5)
 
 
 _HW_STATS = "TA HW Stats"

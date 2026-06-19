@@ -66,7 +66,7 @@ from scheduler import (
     SOURCE_TZ,
     fixed_seminar_events_for,
 )
-from sheets_parser import append_completion_row, append_hw_check_row, write_hw_stats_tab
+from sheets_parser import append_completion_row, append_hw_check_row, append_task_row, write_hw_stats_tab
 
 
 SELECT_PERSON, SELECT_EVENT = range(2)
@@ -675,6 +675,8 @@ async def cb_task_deadline(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     deadline_iso = chosen.astimezone(_tz.utc).isoformat()
     assigned_by = STAFF_IDS.get(query.from_user.id, "Admin")
     task_id = await db.create_task(name, desc, deadline_iso, assigned_by)
+    asyncio.create_task(asyncio.to_thread(
+        append_task_row, _task_assignment_row(name, desc, deadline_iso, assigned_by)))
 
     # Notify the recipient(s) immediately.
     targets = [s for s in await db.get_all_staff() if s["display_name"] == name]
@@ -739,6 +741,8 @@ async def cb_task_custom_date(update: Update, context: ContextTypes.DEFAULT_TYPE
     deadline_iso = deadline_dt.astimezone(_tz.utc).isoformat()
     assigned_by = STAFF_IDS.get(update.effective_user.id, "Admin")
     task_id = await db.create_task(name, desc, deadline_iso, assigned_by)
+    asyncio.create_task(asyncio.to_thread(
+        append_task_row, _task_assignment_row(name, desc, deadline_iso, assigned_by)))
 
     targets = [s for s in await db.get_all_staff() if s["display_name"] == name]
     for s in targets:
@@ -812,6 +816,26 @@ def _task_completion_row(task: dict, completed: bool, reason: str) -> list:
     ]
 
 
+def _task_assignment_row(name: str, desc: str, deadline_iso: str, assigned_by: str) -> list:
+    """Row for the dedicated 'Tasks Log' tab, written when a task is set."""
+    return [
+        _dt.now(_tz.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        name, desc, assigned_by,
+        format_task_deadline(deadline_iso, SOURCE_TZ),
+        "Assigned", "",
+    ]
+
+
+def _task_log_row(task: dict, completed: bool, reason: str) -> list:
+    """Row for the dedicated 'Tasks Log' tab, written when staff responds."""
+    return [
+        _dt.now(_tz.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        task["staff_name"], task["description"], task.get("assigned_by") or "—",
+        format_task_deadline(task["deadline"], SOURCE_TZ),
+        "Done" if completed else "Not done", reason,
+    ]
+
+
 async def cb_task_yes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if not query:
@@ -832,6 +856,7 @@ async def cb_task_yes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             completed=True,
         )
         asyncio.create_task(asyncio.to_thread(append_completion_row, _task_completion_row(task, True, "")))
+        asyncio.create_task(asyncio.to_thread(append_task_row, _task_log_row(task, True, "")))
 
     await query.edit_message_text(msg.COMPLETION_YES_ACK)
 
@@ -854,6 +879,7 @@ async def cb_task_no(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         "staff_name": task["staff_name"],
         "description": task["description"],
         "deadline": task["deadline"],
+        "assigned_by": task.get("assigned_by"),
         "chat_id": query.from_user.id,
     }
     await query.edit_message_text(msg.COMPLETION_NO_PROMPT)
@@ -1075,8 +1101,10 @@ async def cb_completion_reason(update: Update, context: ContextTypes.DEFAULT_TYP
             "staff_name": pending["staff_name"],
             "description": pending["description"],
             "deadline": pending["deadline"],
+            "assigned_by": pending.get("assigned_by"),
         }
         asyncio.create_task(asyncio.to_thread(append_completion_row, _task_completion_row(task, False, reason)))
+        asyncio.create_task(asyncio.to_thread(append_task_row, _task_log_row(task, False, reason)))
         await update.message.reply_text(msg.COMPLETION_NO_ACK)
         return ConversationHandler.END
 

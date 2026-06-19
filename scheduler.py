@@ -535,7 +535,7 @@ async def check_skipped_responses(bot: Bot) -> None:
     Each item is logged exactly once — the sweep marks it answered/resolved
     immediately after, so it won't fire again.
     """
-    from sheets_parser import append_completion_row, append_hw_check_row, write_hw_stats_tab
+    from sheets_parser import append_completion_row, append_hw_check_row, append_task_row, write_hw_stats_tab
 
     now = datetime.now(timezone.utc)
     cutoff = (now - timedelta(hours=SKIP_BUFFER_HOURS)).isoformat()
@@ -586,6 +586,14 @@ async def check_skipped_responses(bot: Bot) -> None:
             await asyncio.to_thread(append_completion_row, row)
         except Exception:
             logger.exception("Failed to log skipped task to sheet")
+        task_row = [ts, task["staff_name"], task["description"],
+                    task.get("assigned_by") or "—",
+                    format_task_deadline(task["deadline"], SOURCE_TZ),
+                    "Skipped", reason]
+        try:
+            await asyncio.to_thread(append_task_row, task_row)
+        except Exception:
+            logger.exception("Failed to log skipped task to Tasks Log")
         logger.info("Logged skipped task id=%s", task["id"])
 
     # 3) TA homework checks — keyed on stable (cohort, event_date).
