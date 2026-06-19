@@ -290,8 +290,14 @@ async def send_weekly_task_reminders(bot: Bot) -> None:
                 if await db.weekly_reminder_sent_today(staff["chat_id"], today_str, event["title"], event["cohort"]):
                     continue
                 text = format_weekly_task_reminder(event)
+                # Snapshot the send and key the button on its stable id (wc:s:<id>)
+                # so a sheet sync can't churn the event id out from under the tap.
+                snap_id = await db.mark_weekly_check_sent(
+                    staff["chat_id"], event["staff_name"],
+                    event["title"], event["cohort"], cur_week_str,
+                )
                 keyboard = InlineKeyboardMarkup([[
-                    InlineKeyboardButton("✅ Done", callback_data=f"wc:{event['id']}")
+                    InlineKeyboardButton("✅ Done", callback_data=f"wc:s:{snap_id}")
                 ]])
 
             try:

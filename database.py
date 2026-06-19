@@ -101,6 +101,21 @@ async def init_db() -> None:
                 PRIMARY KEY (chat_id, reminded_date, title, cohort)
             )
         """)
+        # Metadata snapshot for the weekly 'Done' button. The button encodes this
+        # row's stable id (wc:s:<id>), not the volatile event id, so a sheet sync
+        # between the Saturday reminder and the tap can't drop the completion.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS weekly_check_sent (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id    INTEGER NOT NULL,
+                staff_name TEXT NOT NULL,
+                title      TEXT NOT NULL,
+                cohort     TEXT NOT NULL,
+                week_start TEXT NOT NULL,
+                sent_at    TEXT NOT NULL,
+                UNIQUE(chat_id, week_start, title, cohort)
+            )
+        """)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS cohort_group_chats (
                 cohort  TEXT PRIMARY KEY,
@@ -538,6 +553,43 @@ async def mark_weekly_complete(chat_id: int, week_start: str, title: str, cohort
             (chat_id, week_start, title, cohort),
         )
         await db.commit()
+
+
+async def mark_weekly_check_sent(
+    chat_id: int, staff_name: str, title: str, cohort: str, week_start: str
+) -> int:
+    """Snapshot a weekly 'Done' send and return its stable row id for the button.
+
+    Idempotent on (chat_id, week_start, title, cohort): re-sends in the same week
+    return the existing id rather than creating a duplicate.
+    """
+    sent_at = datetime.now(timezone.utc).isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT OR IGNORE INTO weekly_check_sent "
+            "(chat_id, staff_name, title, cohort, week_start, sent_at) VALUES (?,?,?,?,?,?)",
+            (chat_id, staff_name, title, cohort, week_start, sent_at),
+        )
+        await db.commit()
+        cursor = await db.execute(
+            "SELECT id FROM weekly_check_sent "
+            "WHERE chat_id=? AND week_start=? AND title=? AND cohort=?",
+            (chat_id, week_start, title, cohort),
+        )
+        row = await cursor.fetchone()
+        return row[0]
+
+
+async def get_weekly_check(snapshot_id: int) -> dict | None:
+    """Resolve a weekly 'Done' button's snapshot id to its metadata."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT staff_name, title, cohort, week_start FROM weekly_check_sent WHERE id = ?",
+            (snapshot_id,),
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
 
 
 async def weekly_reminder_sent_today(chat_id: int, reminded_date: str, title: str, cohort: str) -> bool:

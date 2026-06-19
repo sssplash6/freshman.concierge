@@ -969,32 +969,54 @@ async def cb_reload_notify(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await query.message.reply_text(msg.RELOAD_NOTIFY_SENT.format(count=sent))
 
 
+async def _resolve_weekly(payload: str) -> dict | None:
+    """Resolve a weekly 'Done' payload to (staff_name, title, cohort, week_start).
+
+    New format 's:<id>' reads the send-time snapshot, which survives the event-id
+    churn of a sheet sync. Legacy format is a bare event id (buttons sent before
+    this fix); resolve those live while they're still in flight.
+    """
+    if payload.startswith("s:") and payload[2:].isdigit():
+        snap = await db.get_weekly_check(int(payload[2:]))
+        return dict(snap) if snap else None
+    if payload.isdigit():
+        event = await db.get_event_by_id(int(payload))
+        if event:
+            return {
+                "staff_name": event["staff_name"],
+                "title": event["title"],
+                "cohort": event["cohort"],
+                "week_start": event["week_start"],
+            }
+    return None
+
+
 async def cb_weekly_complete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if not query:
         return
+
+    meta = await _resolve_weekly(query.data[3:])  # strip "wc:"
+    if not meta:
+        await query.answer("This task is no longer available.", show_alert=False)
+        return
     await query.answer("✅ Marked as complete!")
 
-    event_id = int(query.data[3:])
-    event = await db.get_event_by_id(event_id)
-    if not event:
-        return
-
     chat_id = query.from_user.id
-    await db.mark_weekly_complete(chat_id, event["week_start"], event["title"], event["cohort"])
+    await db.mark_weekly_complete(chat_id, meta["week_start"], meta["title"], meta["cohort"])
     await db.log_completion(
         type="weekly_task",
-        staff_name=event["staff_name"],
+        staff_name=meta["staff_name"],
         chat_id=chat_id,
-        title=event["title"],
-        cohort=event["cohort"],
-        event_ref=event["week_start"],
+        title=meta["title"],
+        cohort=meta["cohort"],
+        event_ref=meta["week_start"],
         completed=True,
     )
     row = [
         _dt.now(_tz.utc).strftime("%Y-%m-%d %H:%M UTC"),
-        event["staff_name"], "Weekly Task",
-        event["title"], event["cohort"], event["week_start"], "Yes", "",
+        meta["staff_name"], "Weekly Task",
+        meta["title"], meta["cohort"], meta["week_start"], "Yes", "",
     ]
     asyncio.create_task(asyncio.to_thread(append_completion_row, row))
     await query.edit_message_reply_markup(reply_markup=None)
