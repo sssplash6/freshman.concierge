@@ -40,7 +40,7 @@ TA_NAMES: list[str] = list(TA_IDS.values())
 STAFF_IDS: dict[int, str] = {
     8384175592: "Sanjar",
     7926199790: "Valera",
-    5012452972: "Sega",
+    5012452972: "Lyusyena",
     8836861446: "Sega",  # Sega's primary account — full admin via REMIND_IDS
     1183676997: "Rustam",
     907955385:  "Nigel",
