@@ -1,7 +1,7 @@
 # database.py
 import os
 import aiosqlite
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date, timedelta
 from zoneinfo import ZoneInfo
 
 DB_PATH = os.environ.get("DB_PATH", "/tmp/concierge_bot.db")
@@ -174,6 +174,30 @@ async def init_db() -> None:
             CREATE TABLE IF NOT EXISTS ta_roster (
                 telegram_id  INTEGER PRIMARY KEY,
                 display_name TEXT NOT NULL
+            )
+        """)
+        # Lecture reminders fire twice (24h + 1h before). The classic reminders_log
+        # has UNIQUE(event_id, chat_id), which can't hold two rows per lecture, so
+        # dual lecture reminders get their own table keyed additionally by `kind`.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS lecture_reminders_log (
+                id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id  INTEGER NOT NULL,
+                chat_id   INTEGER NOT NULL,
+                kind      TEXT NOT NULL,
+                sent_at   TEXT NOT NULL,
+                UNIQUE(event_id, chat_id, kind)
+            )
+        """)
+        # Tracks the one-time Sunday-10PM escalation to Sega for an unfinished
+        # consult, so it fires at most once per (week, teacher, cohort).
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS consult_escalations_sent (
+                week_start  TEXT NOT NULL,
+                staff_name  TEXT NOT NULL,
+                cohort      TEXT NOT NULL,
+                sent_at     TEXT NOT NULL,
+                UNIQUE(week_start, staff_name, cohort)
             )
         """)
         # Migrations: add skip-tracking columns to the prompt tables if missing.
@@ -360,6 +384,84 @@ async def reminder_already_sent(event_id: int, chat_id: int) -> bool:
             (event_id, chat_id),
         )
         return await cursor.fetchone() is not None
+
+
+async def log_lecture_reminder(event_id: int, chat_id: int, kind: str) -> None:
+    """Record that the ``kind`` ('24h' or '1h') lecture reminder went out."""
+    sent_at = datetime.now(timezone.utc).isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT OR IGNORE INTO lecture_reminders_log (event_id, chat_id, kind, sent_at) VALUES (?, ?, ?, ?)",
+            (event_id, chat_id, kind, sent_at),
+        )
+        await db.commit()
+
+
+async def lecture_reminder_sent(event_id: int, chat_id: int, kind: str) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT 1 FROM lecture_reminders_log WHERE event_id = ? AND chat_id = ? AND kind = ?",
+            (event_id, chat_id, kind),
+        )
+        return await cursor.fetchone() is not None
+
+
+async def consult_escalation_sent(week_start: str, staff_name: str, cohort: str) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT 1 FROM consult_escalations_sent WHERE week_start=? AND staff_name=? AND cohort=?",
+            (week_start, staff_name, cohort),
+        )
+        return await cursor.fetchone() is not None
+
+
+async def log_consult_escalation(week_start: str, staff_name: str, cohort: str) -> None:
+    sent_at = datetime.now(timezone.utc).isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT OR IGNORE INTO consult_escalations_sent (week_start, staff_name, cohort, sent_at) VALUES (?,?,?,?)",
+            (week_start, staff_name, cohort, sent_at),
+        )
+        await db.commit()
+
+
+async def get_upcoming_ta_tasks(days: int = 14) -> list[dict]:
+    """Per-TA homework-check tasks coming up in the next ``days`` days.
+
+    Each lecture/seminar with a date maps to a homework check for the cohort's
+    assigned TA (due 3 days after the session). Returns rows ordered by TA then
+    date, for the admin-facing 'TA HW Stats' upcoming section.
+    """
+    today = datetime.now(ZoneInfo("Asia/Tashkent")).date()
+    today_s = today.isoformat()
+    horizon_s = (today + timedelta(days=days)).isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            """
+            SELECT e.cohort AS cohort, e.title AS title, e.event_date AS event_date, a.ta_name AS ta_name
+            FROM events e
+            JOIN ta_assignments a ON a.cohort = e.cohort
+            WHERE e.type IN ('lecture', 'seminar')
+              AND e.event_date IS NOT NULL
+              AND e.event_date >= ?
+              AND e.event_date <= ?
+            ORDER BY a.ta_name, e.event_date
+            """,
+            (today_s, horizon_s),
+        )
+        rows = await cursor.fetchall()
+    tasks = []
+    for r in rows:
+        ed = date.fromisoformat(r["event_date"])
+        tasks.append({
+            "ta_name": r["ta_name"],
+            "cohort": r["cohort"],
+            "title": r["title"],
+            "session_date": r["event_date"],
+            "due_date": (ed + timedelta(days=3)).isoformat(),
+        })
+    return tasks
 
 
 async def log_sync(event_count: int) -> None:

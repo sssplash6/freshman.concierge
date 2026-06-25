@@ -166,8 +166,11 @@ def compute_reminder_dt(event: dict, tz: pytz.BaseTzInfo | None = None) -> datet
     return None
 
 
-def format_reminder_message(event: dict, tz: pytz.BaseTzInfo | None = None) -> str:
-    """Format a reminder message string for the given event in the recipient's zone."""
+def format_reminder_message(event: dict, tz: pytz.BaseTzInfo | None = None, kind: str = "1h") -> str:
+    """Format a reminder message string for the given event in the recipient's zone.
+
+    ``kind`` selects the lecture reminder copy: '24h' (a day ahead) or '1h'.
+    """
     tz = tz or SOURCE_TZ
     if event["type"] == "lecture":
         inst = event_instant(event)
@@ -183,7 +186,8 @@ def format_reminder_message(event: dict, tz: pytz.BaseTzInfo | None = None) -> s
             datestr = d.strftime("%B %-d")
             timestr = "TBD"
             label = tz_label(tz.localize(datetime(d.year, d.month, d.day)))
-        return msg.REMINDER_LECTURE.format(
+        template = msg.REMINDER_LECTURE_24H if kind == "24h" else msg.REMINDER_LECTURE
+        return template.format(
             title=_e(event["title"]),
             cohort=_e(event["cohort"]),
             weekday=weekday,
@@ -216,6 +220,20 @@ def format_reminder_message(event: dict, tz: pytz.BaseTzInfo | None = None) -> s
     raise ValueError(f"Unknown event type: {event['type']!r}")
 
 
+def consult_week_number(cohort: str, week_start: str, events: list[dict]) -> int | None:
+    """1-based index of ``week_start`` among ``cohort``'s distinct consult weeks.
+
+    Used to label the shared consult message ('for this Week N'). Returns None if
+    the week isn't found among that cohort's consults.
+    """
+    weeks = sorted({
+        e["week_start"] for e in events
+        if e.get("type") == "consult" and e.get("week_start") and not e.get("event_date")
+        and e.get("cohort") == cohort
+    })
+    return weeks.index(week_start) + 1 if week_start in weeks else None
+
+
 def format_weekly_task_reminder(event: dict) -> str:
     d = date.fromisoformat(event["week_start"])
     return msg.WEEKLY_TASK_REMINDER.format(
@@ -239,10 +257,6 @@ async def send_weekly_task_reminders(bot: Bot) -> None:
     """
     events = await db.get_all_events()
     staff_list = await db.get_all_staff()
-    link_updated = {
-        (l["staff_name"], l["cohort"]): (l.get("updated_at") or "")
-        for l in await db.get_all_consult_links()
-    }
 
     for staff in staff_list:
         now_local = datetime.now(staff_tz(staff))
@@ -251,8 +265,6 @@ async def send_weekly_task_reminders(bot: Bot) -> None:
             continue
         today = now_local.date()
         current_monday = today - timedelta(days=today.weekday())
-        next_monday = current_monday + timedelta(days=7)
-        next_sunday = next_monday + timedelta(days=6)
         cur_week_str = current_monday.isoformat()
         today_str = today.isoformat()
 
@@ -263,24 +275,9 @@ async def send_weekly_task_reminders(bot: Bot) -> None:
                 continue
 
             if event.get("type") == "consult":
-                # Upcoming (next-week) consults only.
-                ws = event["week_start"]
-                if not (next_monday.isoformat() <= ws <= next_sunday.isoformat()):
-                    continue
-                # Already set or refreshed a link for this cohort this week? Don't nag.
-                upd = link_updated.get((staff["display_name"], event["cohort"]), "")
-                if upd[:10] >= cur_week_str:
-                    continue
-                if await db.weekly_reminder_sent_today(staff["chat_id"], today_str, event["title"], event["cohort"]):
-                    continue
-                d = date.fromisoformat(ws)
-                text = msg.WEEKLY_CONSULT_SET_LINK.format(
-                    cohort=_e(event["cohort"]),
-                    date=d.strftime("%B %-d"),
-                )
-                keyboard = InlineKeyboardMarkup([[
-                    InlineKeyboardButton("🔗 Set Link", callback_data=f"slset:{event['cohort']}")
-                ]])
+                # Consults are chased daily (with a Sunday-10PM escalation) by
+                # check_consult_tasks — skip them here.
+                continue
             else:
                 # Generic weekly task — current week, 'tap Done'.
                 if event["week_start"] != cur_week_str:
@@ -345,6 +342,36 @@ async def check_and_send_reminders(bot: Bot) -> None:
             if staff["display_name"] != event["staff_name"]:
                 continue
             tz = staff_tz(staff)
+
+            # Lectures get two reminders — 24h and 1h before — each tracked
+            # separately so one can't suppress the other.
+            if event["type"] == "lecture":
+                inst = event_instant(event)
+                if inst is None:
+                    continue
+                for kind, reminder_dt in (
+                    ("24h", inst - timedelta(hours=24)),
+                    ("1h",  inst - timedelta(hours=1)),
+                ):
+                    if not (reminder_dt <= now <= reminder_dt + timedelta(minutes=30)):
+                        continue
+                    if await db.lecture_reminder_sent(event["id"], staff["chat_id"], kind):
+                        continue
+                    try:
+                        text = format_reminder_message(event, tz, kind=kind)
+                    except Exception:
+                        logger.exception("Failed to format lecture reminder for event %d", event["id"])
+                        continue
+                    try:
+                        await bot.send_message(chat_id=staff["chat_id"], text=text, parse_mode="HTML")
+                        await db.log_lecture_reminder(event["id"], staff["chat_id"], kind)
+                        logger.info(
+                            "Sent %s lecture reminder for event %d to chat %d", kind, event["id"], staff["chat_id"]
+                        )
+                    except TelegramError as e:
+                        logger.error("Failed to send lecture reminder to %d: %s", staff["chat_id"], e)
+                continue
+
             reminder_dt = compute_reminder_dt(event, tz)
             if reminder_dt is None:
                 continue
@@ -376,6 +403,10 @@ async def send_completion_checks(bot: Bot) -> None:
     staff_list = await db.get_all_staff()
 
     for event in events:
+        # Lectures no longer get a post-session completion check — only the 24h
+        # and 1h reminders remain.
+        if event["type"] == "lecture":
+            continue
         inst = event_instant(event)
         if inst is None:
             continue
@@ -418,6 +449,104 @@ async def send_completion_checks(bot: Bot) -> None:
                 logger.info("Sent completion check for event %d to chat %d", event["id"], staff["chat_id"])
             except TelegramError as e:
                 logger.error("Failed to send completion check to %d: %s", staff["chat_id"], e)
+
+
+async def check_consult_tasks(bot: Bot) -> None:
+    """Chase teachers to send this week's consult link, escalate to Sega if not.
+
+    For each of the current week's consultations:
+      • a daily 10:00 (recipient-local) nudge with a 'Send link' button, until the
+        link is posted to the group (which marks the consult complete), and
+      • a one-time escalation DM to Sega if it's still unsent by Sunday 22:00
+        Asia/Tashkent.
+    Runs on a 60-second interval; per-day / per-week idempotency keeps each send
+    to a single message.
+    """
+    from config import REMIND_IDS
+
+    events = await db.get_all_events()
+    staff_list = await db.get_all_staff()
+
+    def _is_current_consult(event: dict, monday_str: str) -> bool:
+        return (
+            event.get("type") == "consult"
+            and event.get("week_start") == monday_str
+            and not event.get("event_date")
+        )
+
+    # --- Daily per-teacher nudge (in each recipient's own zone) ---
+    for staff in staff_list:
+        now_local = datetime.now(staff_tz(staff))
+        today = now_local.date()
+        current_monday = today - timedelta(days=today.weekday())
+        cur_week_str = current_monday.isoformat()
+        today_str = today.isoformat()
+
+        if not (now_local.hour == 10 and now_local.minute < 30):
+            continue
+
+        for event in events:
+            if not _is_current_consult(event, cur_week_str):
+                continue
+            if staff["display_name"] != event["staff_name"]:
+                continue
+            cohort = event["cohort"]
+            if await db.is_weekly_complete(staff["chat_id"], cur_week_str, "Consultation", cohort):
+                continue
+            if await db.weekly_reminder_sent_today(staff["chat_id"], today_str, "Consultation", cohort):
+                continue
+            d = date.fromisoformat(cur_week_str)
+            text = msg.CONSULT_REMINDER.format(cohort=_e(cohort), date=d.strftime("%B %-d"))
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔗 Send link", callback_data=f"clset:{cohort}")
+            ]])
+            try:
+                await bot.send_message(
+                    chat_id=staff["chat_id"], text=text, parse_mode="HTML", reply_markup=keyboard
+                )
+                await db.log_weekly_reminder(staff["chat_id"], today_str, "Consultation", cohort)
+                logger.info("Sent consult nudge to chat %d (%s)", staff["chat_id"], cohort)
+            except TelegramError as e:
+                logger.error("Failed to send consult nudge to %d: %s", staff["chat_id"], e)
+
+    # --- Sunday 22:00 Tashkent escalation to Sega ---
+    now_tk = datetime.now(SOURCE_TZ)
+    if not (now_tk.weekday() == 6 and now_tk.hour == 22 and now_tk.minute < 30):
+        return
+
+    monday = now_tk.date() - timedelta(days=now_tk.date().weekday())
+    monday_str = monday.isoformat()
+    sega_recipients = [s for s in staff_list if s["chat_id"] in REMIND_IDS]
+    chats_by_name: dict[str, list[dict]] = {}
+    for s in staff_list:
+        chats_by_name.setdefault(s["display_name"], []).append(s)
+
+    for event in events:
+        if not _is_current_consult(event, monday_str):
+            continue
+        cohort = event["cohort"]
+        staff_name = event["staff_name"]
+        teacher_chats = chats_by_name.get(staff_name, [])
+        done = False
+        for tc in teacher_chats:
+            if await db.is_weekly_complete(tc["chat_id"], monday_str, "Consultation", cohort):
+                done = True
+                break
+        if done:
+            continue
+        if await db.consult_escalation_sent(monday_str, staff_name, cohort):
+            continue
+        d = date.fromisoformat(monday_str)
+        text = msg.CONSULT_ESCALATION.format(
+            staff=_e(staff_name), cohort=_e(cohort), date=d.strftime("%B %-d")
+        )
+        for sc in sega_recipients:
+            try:
+                await bot.send_message(chat_id=sc["chat_id"], text=text, parse_mode="HTML")
+            except TelegramError as e:
+                logger.error("Failed to send consult escalation to %d: %s", sc["chat_id"], e)
+        await db.log_consult_escalation(monday_str, staff_name, cohort)
+        logger.info("Escalated unfinished consult to Sega (%s / %s)", staff_name, cohort)
 
 
 def format_task_deadline(deadline_iso: str, tz: pytz.BaseTzInfo) -> str:
@@ -606,7 +735,11 @@ async def check_skipped_responses(bot: Bot) -> None:
             logger.info("Logged skipped HW check (cohort=%s date=%s chat=%s)", p["cohort"], p["event_date"], p["chat_id"])
         if logged_any:
             try:
-                await asyncio.to_thread(write_hw_stats_tab, await db.get_hw_stats())
+                await asyncio.to_thread(
+                    write_hw_stats_tab,
+                    await db.get_hw_stats(),
+                    await db.get_upcoming_ta_tasks(),
+                )
             except Exception:
                 logger.exception("Failed to refresh HW stats after skip logging")
 
@@ -622,6 +755,16 @@ async def sync_schedule(bot: Bot) -> None:
         await db.replace_events(events)
         await db.log_sync(len(events))
         logger.info("Schedule synced: %d events loaded.", len(events))
+        # Keep the admin-facing 'TA HW Stats' upcoming (2-week) section current.
+        try:
+            from sheets_parser import write_hw_stats_tab
+            await asyncio.to_thread(
+                write_hw_stats_tab,
+                await db.get_hw_stats(),
+                await db.get_upcoming_ta_tasks(),
+            )
+        except Exception:
+            logger.exception("Failed to refresh TA HW Stats after sync")
     except Exception:
         logger.exception("Schedule sync failed")
 
@@ -696,6 +839,15 @@ async def init_scheduler(bot: Bot) -> None:
         seconds=60,
         kwargs={"bot": bot},
         id="hw_completion_checks",
+        replace_existing=True,
+    )
+    # Daily consult nudges (10:00 local) + Sunday 22:00 Tashkent escalation to Sega.
+    scheduler.add_job(
+        check_consult_tasks,
+        trigger="interval",
+        seconds=60,
+        kwargs={"bot": bot},
+        id="consult_tasks",
         replace_existing=True,
     )
     # Sweep for check-ins left unanswered past the buffer; logs them as skipped.

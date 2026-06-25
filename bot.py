@@ -20,7 +20,8 @@ from telegram.ext import (
 
 MAIN_KEYBOARD = ReplyKeyboardMarkup(
     [
-        [KeyboardButton("📅 My Schedule"), KeyboardButton("🔗 Set Link")],
+        [KeyboardButton("📅 My Schedule"), KeyboardButton("📆 Full Schedule")],
+        [KeyboardButton("🔗 Send Consult Link")],
         [KeyboardButton("🌍 Timezone")],
     ],
     resize_keyboard=True,
@@ -29,8 +30,9 @@ MAIN_KEYBOARD = ReplyKeyboardMarkup(
 
 ADMIN_KEYBOARD = ReplyKeyboardMarkup(
     [
-        [KeyboardButton("📅 My Schedule"), KeyboardButton("📣 Remind")],
-        [KeyboardButton("📝 Assign Task"), KeyboardButton("📢 Broadcast")],
+        [KeyboardButton("📅 My Schedule"), KeyboardButton("📆 Full Schedule")],
+        [KeyboardButton("📣 Remind"),      KeyboardButton("📝 Assign Task")],
+        [KeyboardButton("📢 Broadcast")],
         [KeyboardButton("⚙️ Settings")],
     ],
     resize_keyboard=True,
@@ -39,9 +41,9 @@ ADMIN_KEYBOARD = ReplyKeyboardMarkup(
 
 SETTINGS_KEYBOARD = ReplyKeyboardMarkup(
     [
-        [KeyboardButton("🔄 Reload"),    KeyboardButton("📊 Sync Status")],
-        [KeyboardButton("🔗 Set Link"),  KeyboardButton("🌍 Timezone")],
-        [KeyboardButton("🎓 Assign TA"), KeyboardButton("➕ Add TA")],
+        [KeyboardButton("🔄 Reload"),       KeyboardButton("📊 Sync Status")],
+        [KeyboardButton("📌 Set Group ID"), KeyboardButton("🌍 Timezone")],
+        [KeyboardButton("🎓 Assign TA"),    KeyboardButton("➕ Add TA")],
         [KeyboardButton("← Back")],
     ],
     resize_keyboard=True,
@@ -53,7 +55,7 @@ from dateutil import parser as _du_parser
 
 import database as db
 import messages as msg
-from config import ADMIN_CHAT_ID, REMIND_IDS, STAFF_IDS, TELEGRAM_BOT_TOKEN
+from config import ADMIN_CHAT_ID, GOOGLE_SHEETS_ID, REMIND_IDS, STAFF_IDS, TELEGRAM_BOT_TOKEN
 from datetime import datetime as _dt, timezone as _tz
 from scheduler import (
     format_reminder_message,
@@ -64,6 +66,7 @@ from scheduler import (
     parse_timezone_input,
     tz_pretty,
     SOURCE_TZ,
+    consult_week_number,
     fixed_seminar_events_for,
 )
 from sheets_parser import append_completion_row, append_hw_check_row, append_task_row, write_hw_stats_tab
@@ -71,8 +74,9 @@ from sheets_parser import append_completion_row, append_hw_check_row, append_tas
 
 SELECT_PERSON, SELECT_EVENT = range(2)
 AWAITING_REASON = 0   # state for completion_conv
-SETLINK_COHORT = 0    # states for setlink_conv
-SETLINK_URL    = 1
+SENDLINK_PICK    = 0  # states for sendlink_conv
+SENDLINK_LINK    = 1
+SENDLINK_CONFIRM = 2
 SETGROUP_COHORT = 0   # states for setgroup_conv
 SETGROUP_ID     = 1
 TASK_PERSON      = 0     # states for task_conv
@@ -389,7 +393,47 @@ async def cb_remind_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     return ConversationHandler.END
 
 
-async def cmd_setlink(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+def _current_week_monday() -> str:
+    """ISO date of this week's Monday in the team (Tashkent) zone."""
+    today = _dt.now(SOURCE_TZ).date()
+    return (today - timedelta(days=today.weekday())).isoformat()
+
+
+async def _sendlink_show_link_step(query, context, staff_name: str, cohort: str, week: str) -> int:
+    """Show the current link (if any) and prompt to set/keep it."""
+    context.user_data["sl_cohort"] = cohort
+    context.user_data["sl_week"] = week
+    existing = await db.get_consult_link(staff_name, cohort)
+    if existing:
+        text = msg.SENDLINK_LINK_PROMPT_HAS.format(cohort=_e(cohort), link=_e(existing))
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Keep current", callback_data="clkeep")],
+            [InlineKeyboardButton("❌ Cancel",       callback_data="clx")],
+        ])
+    else:
+        text = msg.SENDLINK_LINK_PROMPT_NONE.format(cohort=_e(cohort))
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="clx")]])
+    await query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
+    return SENDLINK_LINK
+
+
+async def _sendlink_confirm_step(send, context, cohort: str, link: str) -> int:
+    """Ask the teacher whether to post the link to the group now."""
+    context.user_data["sl_link"] = link
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("📤 Send now", callback_data="clsend"),
+        InlineKeyboardButton("🕒 Not now",  callback_data="clnot"),
+    ]])
+    await send(
+        msg.SENDLINK_CONFIRM.format(cohort=_e(cohort), link=_e(link)),
+        parse_mode="HTML",
+        reply_markup=keyboard,
+    )
+    return SENDLINK_CONFIRM
+
+
+async def cmd_sendlink(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """List the teacher's next two consultations to share a link for."""
     if not update.effective_user or not update.message:
         return ConversationHandler.END
     staff = await db.get_staff(update.effective_user.id)
@@ -397,28 +441,48 @@ async def cmd_setlink(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         await update.message.reply_text(msg.NOT_REGISTERED)
         return ConversationHandler.END
 
-    cohorts = await db.get_cohorts_for_staff(staff["display_name"])
-    if not cohorts:
-        cohorts = await db.get_all_cohorts()
-    if not cohorts:
-        await update.message.reply_text(msg.SETLINK_NO_COHORTS)
+    # Current week onward (week_start >= this Monday) so a mid-week teacher still
+    # sees the in-progress week's consult, not just future ones.
+    this_monday = _current_week_monday()
+    events = await db.get_events_for_staff(staff["display_name"])
+    consults = [
+        e for e in events
+        if e.get("type") == "consult" and e.get("week_start") and not e.get("event_date")
+        and e["week_start"] >= this_monday
+    ]
+    consults.sort(key=lambda e: e["week_start"])
+    options: list[dict] = []
+    seen: set[tuple] = set()
+    for e in consults:
+        key = (e["cohort"], e["week_start"])
+        if key in seen:
+            continue
+        seen.add(key)
+        options.append({"cohort": e["cohort"], "week_start": e["week_start"]})
+        if len(options) == 2:
+            break
+
+    if not options:
+        await update.message.reply_text(msg.SENDLINK_NO_CONSULTS)
         return ConversationHandler.END
 
-    keyboard = [[InlineKeyboardButton(c, callback_data=f"sl:{c}")] for c in cohorts]
-    keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="sl:cancel")])
+    context.user_data["sl_options"] = options
+    keyboard = []
+    for i, o in enumerate(options):
+        d = date.fromisoformat(o["week_start"])
+        keyboard.append([InlineKeyboardButton(
+            f"{o['cohort']} · Week of {d.strftime('%b %-d')}", callback_data=f"cl:{i}"
+        )])
+    keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="clx")])
     await update.message.reply_text(
-        msg.SETLINK_CHOOSE_COHORT,
+        msg.SENDLINK_PICK_COHORT,
+        parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(keyboard),
     )
-    return SETLINK_COHORT
+    return SENDLINK_PICK
 
 
-async def cb_setlink_from_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Entry point for the 'Set Link' button on the weekly consult reminder.
-
-    The cohort is already known (encoded in the callback), so we skip cohort
-    selection and go straight to asking for the link.
-    """
+async def cb_sendlink_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     if not query:
         return ConversationHandler.END
@@ -429,82 +493,152 @@ async def cb_setlink_from_reminder(update: Update, context: ContextTypes.DEFAULT
         await query.edit_message_text(msg.NOT_REGISTERED)
         return ConversationHandler.END
 
-    cohort = query.data[len("slset:"):]
-    context.user_data["setlink_cohort"] = cohort
-    await query.edit_message_text(
-        msg.SETLINK_ENTER_LINK.format(cohort=_e(cohort)),
-        parse_mode="HTML",
-    )
-    return SETLINK_URL
+    idx = int(query.data[3:])  # strip "cl:"
+    options = context.user_data.get("sl_options") or []
+    if idx >= len(options):
+        await query.edit_message_text(msg.CANCELLED)
+        return ConversationHandler.END
+    o = options[idx]
+    return await _sendlink_show_link_step(query, context, staff["display_name"], o["cohort"], o["week_start"])
 
 
-async def cb_setlink_cohort(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def cb_sendlink_from_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Entry from the daily consult nudge button — cohort is encoded in the callback."""
     query = update.callback_query
     if not query:
         return ConversationHandler.END
     await query.answer()
 
-    if query.data == "sl:cancel":
+    staff = await db.get_staff(query.from_user.id)
+    if not staff:
+        await query.edit_message_text(msg.NOT_REGISTERED)
+        return ConversationHandler.END
+
+    cohort = query.data[len("clset:"):]
+    return await _sendlink_show_link_step(query, context, staff["display_name"], cohort, _current_week_monday())
+
+
+async def cb_sendlink_keep(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if not query:
+        return ConversationHandler.END
+
+    staff = await db.get_staff(query.from_user.id)
+    cohort = context.user_data.get("sl_cohort")
+    if not staff or not cohort:
+        await query.answer()
+        return ConversationHandler.END
+    link = await db.get_consult_link(staff["display_name"], cohort)
+    if not link:
+        await query.answer(msg.SENDLINK_NEED_LINK, show_alert=True)
+        return SENDLINK_LINK
+    await query.answer()
+
+    async def _send(text, **kw):
+        await query.edit_message_text(text, **kw)
+    return await _sendlink_confirm_step(_send, context, cohort, link)
+
+
+async def cb_sendlink_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if not update.message or not update.effective_user:
+        return SENDLINK_LINK
+    staff = await db.get_staff(update.effective_user.id)
+    cohort = context.user_data.get("sl_cohort")
+    if not staff or not cohort:
+        return ConversationHandler.END
+
+    link = update.message.text.strip()
+    await db.set_consult_link(staff["display_name"], cohort, link)
+    return await _sendlink_confirm_step(update.message.reply_text, context, cohort, link)
+
+
+async def cb_sendlink_send(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if not query:
+        return ConversationHandler.END
+    await query.answer()
+
+    staff = await db.get_staff(query.from_user.id)
+    cohort = context.user_data.pop("sl_cohort", None)
+    week = context.user_data.pop("sl_week", None)
+    link = context.user_data.pop("sl_link", None)
+    context.user_data.pop("sl_options", None)
+    if not staff or not cohort or not week or not link:
         await query.edit_message_text(msg.CANCELLED)
         return ConversationHandler.END
 
-    cohort = query.data[3:]
-    context.user_data["setlink_cohort"] = cohort
-    await query.edit_message_text(
-        msg.SETLINK_ENTER_LINK.format(cohort=_e(cohort)),
-        parse_mode="HTML",
-    )
-    return SETLINK_URL
-
-
-async def cb_setlink_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if not update.message or not update.effective_user:
-        return SETLINK_URL
-
-    link = update.message.text.strip()
-    cohort = context.user_data.pop("setlink_cohort", None)
-    if not cohort:
-        return ConversationHandler.END
-
-    staff = await db.get_staff(update.effective_user.id)
-    if not staff:
-        return ConversationHandler.END
-
-    await db.set_consult_link(staff["display_name"], cohort, link)
-    await update.message.reply_text(
-        msg.SETLINK_SAVED.format(cohort=_e(cohort)),
-        parse_mode="HTML",
-    )
-
-    # Auto-forward the link to the cohort's group chat with a booking nudge.
     group_chats = await db.get_all_group_chats()
     group_id = group_chats.get(cohort)
     if not group_id:
-        await update.message.reply_text(
-            msg.SETLINK_NO_GROUP.format(cohort=_e(cohort)),
-            parse_mode="HTML",
-        )
+        await query.edit_message_text(msg.SENDLINK_NO_GROUP.format(cohort=_e(cohort)), parse_mode="HTML")
         return ConversationHandler.END
 
-    text = msg.CONSULT_LINK_BOOK_NOW.format(
-        staff=_e(staff["display_name"]),
-        cohort=_e(cohort),
-        link=link,
-    )
+    events = await db.get_all_events()
+    wk_no = consult_week_number(cohort, week, events)
+    week_phrase = f"Week {wk_no}" if wk_no else "week"
+    text = msg.CONSULT_SHARE.format(name=_e(staff["display_name"]), week=week_phrase, link=link)
     try:
         await context.bot.send_message(chat_id=group_id, text=text, parse_mode="HTML")
-        await update.message.reply_text(
-            msg.SETLINK_FORWARDED.format(cohort=_e(cohort)),
-            parse_mode="HTML",
-        )
-        logger.info("Forwarded consult link for %s / %s to group %d", staff["display_name"], cohort, group_id)
     except TelegramError as e:
-        logger.error("Failed to forward consult link to group %d: %s", group_id, e)
-        await update.message.reply_text(
-            msg.SETLINK_NO_GROUP.format(cohort=_e(cohort)),
-            parse_mode="HTML",
-        )
+        logger.error("Failed to post consult link to group %d: %s", group_id, e)
+        await query.edit_message_text(msg.SENDLINK_NO_GROUP.format(cohort=_e(cohort)), parse_mode="HTML")
+        return ConversationHandler.END
+
+    # Auto-complete the consultation task for this week.
+    chat_id = query.from_user.id
+    await db.mark_weekly_complete(chat_id, week, "Consultation", cohort)
+    await db.log_completion(
+        type="weekly_task",
+        staff_name=staff["display_name"],
+        chat_id=chat_id,
+        title="Consultation",
+        cohort=cohort,
+        event_ref=week,
+        completed=True,
+    )
+    row = [
+        _dt.now(_tz.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        staff["display_name"], "Consult",
+        "Consultation", cohort, week, "Yes", "",
+    ]
+    asyncio.create_task(asyncio.to_thread(append_completion_row, row))
+    logger.info("Posted consult link for %s / %s to group %d", staff["display_name"], cohort, group_id)
+    await query.edit_message_text(msg.SENDLINK_SENT.format(cohort=_e(cohort)), parse_mode="HTML")
     return ConversationHandler.END
+
+
+async def cb_sendlink_not_now(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if not query:
+        return ConversationHandler.END
+    await query.answer()
+    cohort = context.user_data.get("sl_cohort")
+    for k in ("sl_cohort", "sl_week", "sl_link", "sl_options"):
+        context.user_data.pop(k, None)
+    await query.edit_message_text(
+        msg.SENDLINK_SAVED_ONLY.format(cohort=_e(cohort or "")), parse_mode="HTML"
+    )
+    return ConversationHandler.END
+
+
+async def cb_sendlink_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if not query:
+        return ConversationHandler.END
+    await query.answer()
+    for k in ("sl_cohort", "sl_week", "sl_link", "sl_options"):
+        context.user_data.pop(k, None)
+    await query.edit_message_text(msg.CANCELLED)
+    return ConversationHandler.END
+
+
+async def cmd_full_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send an inline button linking to the synced AP schedule spreadsheet."""
+    if not update.effective_user or not update.message:
+        return
+    url = f"https://docs.google.com/spreadsheets/d/{GOOGLE_SHEETS_ID}/edit"
+    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("📆 Open AP schedule", url=url)]])
+    await update.message.reply_text(msg.FULL_SCHEDULE, parse_mode="HTML", reply_markup=keyboard)
 
 
 async def cmd_setgroup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1371,7 +1505,8 @@ async def cb_assign_ta_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def _refresh_hw_stats() -> None:
     stats = await db.get_hw_stats()
-    asyncio.create_task(asyncio.to_thread(write_hw_stats_tab, stats))
+    upcoming = await db.get_upcoming_ta_tasks()
+    asyncio.create_task(asyncio.to_thread(write_hw_stats_tab, stats, upcoming))
 
 
 async def _resolve_hw(payload: str) -> tuple[str | None, str, str]:
@@ -1487,27 +1622,34 @@ async def cb_add_ta_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
 
 _keyboard_buttons = filters.Text([
-    "← Back", "⚙️ Settings", "📅 My Schedule", "📣 Remind",
+    "← Back", "⚙️ Settings", "📅 My Schedule", "📆 Full Schedule", "📣 Remind",
     "📝 Assign Task", "📢 Broadcast", "🔄 Reload", "📊 Sync Status",
-    "🔗 Set Link", "🌍 Timezone", "🎓 Assign TA",
+    "🔗 Send Consult Link", "📌 Set Group ID", "🌍 Timezone", "🎓 Assign TA",
 ])
 
 
 def build_app() -> Application:
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-    setlink_conv = ConversationHandler(
+    sendlink_conv = ConversationHandler(
         entry_points=[
-            CommandHandler("setlink", cmd_setlink),
-            MessageHandler(filters.Text(["🔗 Set Link"]), cmd_setlink),
-            CallbackQueryHandler(cb_setlink_from_reminder, pattern=r"^slset:"),
+            CommandHandler("sendlink", cmd_sendlink),
+            MessageHandler(filters.Text(["🔗 Send Consult Link"]), cmd_sendlink),
+            CallbackQueryHandler(cb_sendlink_from_reminder, pattern=r"^clset:"),
         ],
         states={
-            SETLINK_COHORT: [CallbackQueryHandler(cb_setlink_cohort, pattern=r"^sl:")],
-            SETLINK_URL:    [MessageHandler(filters.TEXT & ~filters.COMMAND & ~_keyboard_buttons, cb_setlink_url)],
+            SENDLINK_PICK: [CallbackQueryHandler(cb_sendlink_pick, pattern=r"^cl:\d+$")],
+            SENDLINK_LINK: [
+                CallbackQueryHandler(cb_sendlink_keep, pattern=r"^clkeep$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND & ~_keyboard_buttons, cb_sendlink_url),
+            ],
+            SENDLINK_CONFIRM: [
+                CallbackQueryHandler(cb_sendlink_send,     pattern=r"^clsend$"),
+                CallbackQueryHandler(cb_sendlink_not_now,  pattern=r"^clnot$"),
+            ],
         },
         fallbacks=[
-            CallbackQueryHandler(cb_setlink_cohort, pattern=r"^sl:cancel$"),
+            CallbackQueryHandler(cb_sendlink_cancel, pattern=r"^clx$"),
             CommandHandler("cancel", cancel_to_menu),
             MessageHandler(_keyboard_buttons, cancel_to_menu),
         ],
@@ -1617,7 +1759,10 @@ def build_app() -> Application:
     )
 
     setgroup_conv = ConversationHandler(
-        entry_points=[CommandHandler("setgroup", cmd_setgroup)],
+        entry_points=[
+            CommandHandler("setgroup", cmd_setgroup),
+            MessageHandler(filters.Text(["📌 Set Group ID"]), cmd_setgroup),
+        ],
         states={
             SETGROUP_COHORT: [CallbackQueryHandler(cb_setgroup_cohort, pattern=r"^sg:")],
             SETGROUP_ID:     [MessageHandler(filters.TEXT & ~filters.COMMAND & ~_keyboard_buttons, cb_setgroup_id)],
@@ -1670,7 +1815,7 @@ def build_app() -> Application:
         per_message=False,
     )
 
-    app.add_handler(setlink_conv)
+    app.add_handler(sendlink_conv)
     app.add_handler(setgroup_conv)
     app.add_handler(completion_conv)
     app.add_handler(remind_conv)
@@ -1689,6 +1834,8 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_reload_notify, pattern=r"^rn:"))
     app.add_handler(CommandHandler("upcoming", cmd_upcoming))
     app.add_handler(MessageHandler(filters.Text(["📅 My Schedule"]), cmd_upcoming))
+    app.add_handler(CommandHandler("schedule", cmd_full_schedule))
+    app.add_handler(MessageHandler(filters.Text(["📆 Full Schedule"]), cmd_full_schedule))
     app.add_handler(CommandHandler("menu", cmd_menu))
     app.add_handler(MessageHandler(filters.Text(["⚙️ Settings"]), cmd_settings))
     app.add_handler(MessageHandler(filters.Text(["← Back"]),     cmd_settings_back))

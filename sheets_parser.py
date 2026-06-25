@@ -687,10 +687,17 @@ def append_task_row(row: list) -> None:
 
 _HW_STATS = "TA HW Stats"
 _HW_STATS_HEADERS = ["TA Name", "Checks Done", "Yes", "No", "Rate"]
+_TA_UPCOMING_TITLE = "Upcoming homework checks — next 2 weeks"
+_TA_UPCOMING_HEADERS = ["TA Name", "Cohort", "Session", "Session Date", "HW Due"]
 
 
-def write_hw_stats_tab(stats: list[dict]) -> None:
-    """Overwrite the 'TA HW Stats' tab with current per-TA summary."""
+def write_hw_stats_tab(stats: list[dict], upcoming: list[dict] | None = None) -> None:
+    """Overwrite the 'TA HW Stats' tab with per-TA summary + 2-week upcoming view.
+
+    ``upcoming`` is the list from ``db.get_upcoming_ta_tasks`` — each TA's homework
+    checks due in the next two weeks — appended below the stats table so admins
+    can see what's coming, not just what's been done.
+    """
     import gspread
     from google.oauth2.service_account import Credentials
     from config import GOOGLE_SERVICE_ACCOUNT_JSON, COMPLETIONS_SHEETS_ID
@@ -703,7 +710,7 @@ def write_hw_stats_tab(stats: list[dict]) -> None:
         ws = sh.worksheet(_HW_STATS)
         ws.clear()
     except gspread.exceptions.WorksheetNotFound:
-        ws = sh.add_worksheet(_HW_STATS, rows=100, cols=5)
+        ws = sh.add_worksheet(_HW_STATS, rows=200, cols=5)
 
     rows = [_HW_STATS_HEADERS]
     for s in stats:
@@ -714,6 +721,25 @@ def write_hw_stats_tab(stats: list[dict]) -> None:
             s["no_count"],
             f"{s['rate']}%",
         ])
+
+    # Upcoming section: blank spacer, title row, column headers, then task rows.
+    upcoming = upcoming or []
+    title_row_idx = section_hdr_idx = None
+    if upcoming:
+        rows.append(["", "", "", "", ""])
+        title_row_idx = len(rows)
+        rows.append([_TA_UPCOMING_TITLE, "", "", "", ""])
+        section_hdr_idx = len(rows)
+        rows.append(list(_TA_UPCOMING_HEADERS))
+        for t in upcoming:
+            rows.append([
+                t["ta_name"],
+                t["cohort"],
+                t["title"],
+                t["session_date"],
+                t["due_date"],
+            ])
+
     ws.update(rows, value_input_option="USER_ENTERED")
 
     sid = ws.id
@@ -764,6 +790,36 @@ def write_hw_stats_tab(stats: list[dict]) -> None:
                 "fields": "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)",
             }
         })
+
+    # Style the upcoming section: title (navy banner) + column header (grey).
+    if title_row_idx is not None:
+        t0 = title_row_idx - 1  # to 0-based
+        requests.append({
+            "repeatCell": {
+                "range": {"sheetId": sid, "startRowIndex": t0, "endRowIndex": t0 + 1,
+                          "startColumnIndex": 0, "endColumnIndex": 5},
+                "cell": {"userEnteredFormat": {
+                    "backgroundColor": _rgb(0.129, 0.196, 0.341),
+                    "textFormat": {"bold": True, "fontSize": 11, "foregroundColor": _rgb(1, 1, 1)},
+                    "verticalAlignment": "MIDDLE",
+                }},
+                "fields": "userEnteredFormat(backgroundColor,textFormat,verticalAlignment)",
+            }
+        })
+        h0 = section_hdr_idx - 1
+        requests.append({
+            "repeatCell": {
+                "range": {"sheetId": sid, "startRowIndex": h0, "endRowIndex": h0 + 1,
+                          "startColumnIndex": 0, "endColumnIndex": 5},
+                "cell": {"userEnteredFormat": {
+                    "backgroundColor": _rgb(0.92, 0.92, 0.92),
+                    "textFormat": {"bold": True},
+                    "horizontalAlignment": "CENTER",
+                }},
+                "fields": "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)",
+            }
+        })
+
     sh.batch_update({"requests": requests})
 
 

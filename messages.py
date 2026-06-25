@@ -65,6 +65,13 @@ REMINDER_LECTURE = (
     "📅 {weekday}, {date} · {time} {tz}</blockquote>"
 )
 
+REMINDER_LECTURE_24H = (
+    "🔔 <b>Your lecture is in 24 hours</b>\n"
+    "<blockquote>📚 {title}\n"
+    "👥 {cohort}\n"
+    "📅 {weekday}, {date} · {time} {tz}</blockquote>"
+)
+
 REMINDER_CONSULT_DATE = (
     "🔔 <b>Consultation today</b>\n"
     "<blockquote>👥 {cohort}\n"
@@ -137,6 +144,61 @@ SETLINK_NO_GROUP = (
     "⚠️ Saved, but no group chat is configured for <b>{cohort}</b>, "
     "so I couldn't forward it. Ask an admin to run /setgroup."
 )
+
+# --- Send Consultation Link flow ------------------------------------------
+SENDLINK_PICK_COHORT = "🔗 <b>Send your consultation link</b>\n\nPick the consultation group:"
+SENDLINK_NO_CONSULTS = "You have no upcoming consultations on the schedule."
+SENDLINK_LINK_PROMPT_HAS = (
+    "🔗 <b>{cohort}</b>\n"
+    "<blockquote>Current link: {link}</blockquote>\n"
+    "Send a new link to replace it, or tap <b>Keep current</b> below."
+)
+SENDLINK_LINK_PROMPT_NONE = (
+    "🔗 <b>{cohort}</b>\n\nNo link is saved yet. Send your consultation link:"
+)
+SENDLINK_NEED_LINK = "No link is saved yet — please send a link first."
+SENDLINK_CONFIRM = (
+    "📤 <b>Send to the {cohort} group now?</b>\n"
+    "<blockquote>{link}</blockquote>"
+)
+SENDLINK_SENT = "✅ Posted to the <b>{cohort}</b> group and marked your consultation as done."
+SENDLINK_SAVED_ONLY = "✅ Saved your link for <b>{cohort}</b>. I didn't post it yet."
+SENDLINK_NO_GROUP = (
+    "⚠️ Saved your link, but no group chat is configured for <b>{cohort}</b>. "
+    "Ask an admin to set the group ID."
+)
+
+# The message forwarded to the cohort's student group when a teacher shares
+# their consultation booking link.
+CONSULT_SHARE = (
+    "📅 <b>Consults with {name}</b>\n\n"
+    "Here are my slots {name} for this {week}. Please make sure to come to my "
+    "meeting on time and with ready questions &amp; edited drafts (if applicable). "
+    "If you wish to reschedule your slot, contact me within 12 hours with a valid "
+    "reason. Otherwise, your meeting will be counted as \"completed.\"\n\n"
+    "See you this week!\n\n"
+    "🔗 {link}"
+)
+
+# Daily nudge to a teacher whose consultation link still isn't out this week.
+CONSULT_REMINDER = (
+    "🔔 <b>Send your consultation link</b>\n"
+    "<blockquote>👥 {cohort}\n"
+    "📅 Week of {date}</blockquote>\n\n"
+    "Students are waiting to book. Tap below to send your link to the group."
+)
+
+# Escalation to Sega when a consult link still isn't out by Sunday 10PM.
+CONSULT_ESCALATION = (
+    "⚠️ <b>Consultation not sent</b>\n"
+    "<blockquote>👤 {staff}\n"
+    "👥 {cohort}\n"
+    "📅 Week of {date}</blockquote>\n\n"
+    "This consultation link wasn't sent to the group by Sunday 10 PM (Tashkent)."
+)
+
+# --- Full schedule --------------------------------------------------------
+FULL_SCHEDULE = "📆 <b>AP schedule</b>\n\nTap below to open the full schedule."
 
 SETGROUP_CHOOSE_COHORT = "🏘 Choose a cohort to assign a group chat to:"
 SETGROUP_ENTER_ID = (
