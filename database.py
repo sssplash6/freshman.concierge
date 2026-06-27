@@ -179,14 +179,19 @@ async def init_db() -> None:
         # Lecture reminders fire twice (24h + 1h before). The classic reminders_log
         # has UNIQUE(event_id, chat_id), which can't hold two rows per lecture, so
         # dual lecture reminders get their own table keyed additionally by `kind`.
+        # Stable-key version: keyed on the lecture's natural identity rather than
+        # the AUTOINCREMENT event_id, which is reassigned on every sheet sync. A
+        # sync between two scheduler ticks (inside the 30-min grace window) used to
+        # give the lecture a fresh id, defeating dedup and re-sending the reminder.
         await db.execute("""
-            CREATE TABLE IF NOT EXISTS lecture_reminders_log (
-                id        INTEGER PRIMARY KEY AUTOINCREMENT,
-                event_id  INTEGER NOT NULL,
-                chat_id   INTEGER NOT NULL,
-                kind      TEXT NOT NULL,
-                sent_at   TEXT NOT NULL,
-                UNIQUE(event_id, chat_id, kind)
+            CREATE TABLE IF NOT EXISTS lecture_reminders_sent_v2 (
+                chat_id    INTEGER NOT NULL,
+                event_date TEXT NOT NULL,
+                event_time TEXT NOT NULL,
+                cohort     TEXT NOT NULL,
+                kind       TEXT NOT NULL,
+                sent_at    TEXT NOT NULL,
+                PRIMARY KEY (chat_id, event_date, event_time, cohort, kind)
             )
         """)
         # Tracks the one-time Sunday-10PM escalation to Sega for an unfinished
@@ -386,22 +391,32 @@ async def reminder_already_sent(event_id: int, chat_id: int) -> bool:
         return await cursor.fetchone() is not None
 
 
-async def log_lecture_reminder(event_id: int, chat_id: int, kind: str) -> None:
-    """Record that the ``kind`` ('24h' or '1h') lecture reminder went out."""
+async def log_lecture_reminder(
+    chat_id: int, event_date: str, event_time: str, cohort: str, kind: str
+) -> None:
+    """Record that the ``kind`` ('24h' or '1h') lecture reminder went out.
+
+    Keyed on the lecture's stable identity (recipient + date + time + cohort) so a
+    sheet sync reassigning event IDs can't make the same reminder fire twice.
+    """
     sent_at = datetime.now(timezone.utc).isoformat()
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "INSERT OR IGNORE INTO lecture_reminders_log (event_id, chat_id, kind, sent_at) VALUES (?, ?, ?, ?)",
-            (event_id, chat_id, kind, sent_at),
+            "INSERT OR IGNORE INTO lecture_reminders_sent_v2 "
+            "(chat_id, event_date, event_time, cohort, kind, sent_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (chat_id, event_date, event_time, cohort, kind, sent_at),
         )
         await db.commit()
 
 
-async def lecture_reminder_sent(event_id: int, chat_id: int, kind: str) -> bool:
+async def lecture_reminder_sent(
+    chat_id: int, event_date: str, event_time: str, cohort: str, kind: str
+) -> bool:
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
-            "SELECT 1 FROM lecture_reminders_log WHERE event_id = ? AND chat_id = ? AND kind = ?",
-            (event_id, chat_id, kind),
+            "SELECT 1 FROM lecture_reminders_sent_v2 "
+            "WHERE chat_id = ? AND event_date = ? AND event_time = ? AND cohort = ? AND kind = ?",
+            (chat_id, event_date, event_time, cohort, kind),
         )
         return await cursor.fetchone() is not None
 

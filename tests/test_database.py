@@ -67,6 +67,28 @@ async def test_reminder_not_sent_twice(db):
 
 
 @pytest.mark.asyncio
+async def test_lecture_reminder_dedup_survives_sync(db):
+    """A sheet sync reassigns event IDs; the stable-keyed dedup must still hold,
+    or the 1h reminder re-fires (the duplicate-'1 hour' bug)."""
+    database.DB_PATH = db
+    await database.replace_events(FIXTURE_LECTURES)
+    ev = (await database.get_events_for_staff("Valera"))[0]
+    key = (222, ev["event_date"], ev["event_time"], ev["cohort"], "1h")
+
+    await database.log_lecture_reminder(*key)
+    assert await database.lecture_reminder_sent(*key) is True
+
+    # Re-sync: events table is wiped and re-inserted with fresh AUTOINCREMENT ids.
+    await database.replace_events(FIXTURE_LECTURES)
+    ev2 = (await database.get_events_for_staff("Valera"))[0]
+    assert ev2["id"] != ev["id"]  # id churned, as in production
+    # Same lecture instance -> still considered sent, no duplicate.
+    assert await database.lecture_reminder_sent(*key) is True
+    # A different reminder kind for the same lecture is independent.
+    assert await database.lecture_reminder_sent(222, ev["event_date"], ev["event_time"], ev["cohort"], "24h") is False
+
+
+@pytest.mark.asyncio
 async def test_get_upcoming_events(db):
     from datetime import date, timedelta
     database.DB_PATH = db

@@ -355,7 +355,16 @@ async def check_and_send_reminders(bot: Bot) -> None:
                 ):
                     if not (reminder_dt <= now <= reminder_dt + timedelta(minutes=30)):
                         continue
-                    if await db.lecture_reminder_sent(event["id"], staff["chat_id"], kind):
+                    # Stable dedup key — event["id"] is reassigned on every sheet
+                    # sync, so a sync mid-window would otherwise re-fire this.
+                    dedup_args = (
+                        staff["chat_id"],
+                        event.get("event_date") or "",
+                        event.get("event_time") or "",
+                        event.get("cohort") or "",
+                        kind,
+                    )
+                    if await db.lecture_reminder_sent(*dedup_args):
                         continue
                     try:
                         text = format_reminder_message(event, tz, kind=kind)
@@ -364,7 +373,7 @@ async def check_and_send_reminders(bot: Bot) -> None:
                         continue
                     try:
                         await bot.send_message(chat_id=staff["chat_id"], text=text, parse_mode="HTML")
-                        await db.log_lecture_reminder(event["id"], staff["chat_id"], kind)
+                        await db.log_lecture_reminder(*dedup_args)
                         logger.info(
                             "Sent %s lecture reminder for event %d to chat %d", kind, event["id"], staff["chat_id"]
                         )
