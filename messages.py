@@ -1,5 +1,14 @@
 # messages.py
 
+# Telegram handle to surface in any error message so users know who to ping.
+ADMIN_CONTACT = "@gapyearingdoesntsuck"
+
+# Generic user-facing error shown by the global error handler.
+UNHANDLED_ERROR = (
+    "❌ Something went wrong on my end. Please try again, and if it keeps "
+    f"happening let {ADMIN_CONTACT} know."
+)
+
 REGISTERED = (
     "✅ You're all set, {name}! You'll receive reminders before your sessions.\n\n"
     "One more step — set your timezone so the timing is right."
@@ -97,7 +106,7 @@ RELOAD_DONE_CHANGED = (
     "Schedule changed for {changed} staff member(s). Notify them?"
 )
 RELOAD_EMPTY = "⚠️ No events returned from the sheet. Existing schedule kept."
-RELOAD_FAILED = "❌ Sync failed. Check the server logs for details."
+RELOAD_FAILED = f"❌ Sync failed. Check the server logs for details, or contact {ADMIN_CONTACT}."
 RELOAD_NOTIFY_SENT = "📣 Notified {count} staff member(s)."
 RELOAD_NOTIFY_SKIPPED = "OK, no notification sent."
 SCHEDULE_UPDATED = "🗓 Your schedule has been updated. Tap 📅 My Schedule to see the latest."

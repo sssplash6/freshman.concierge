@@ -96,6 +96,15 @@ logger = logging.getLogger(__name__)
 
 async def _handle_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.exception("Unhandled bot error", exc_info=context.error)
+    # Let the user know who to ping when something breaks.
+    try:
+        if isinstance(update, Update):
+            if update.callback_query:
+                await update.callback_query.message.reply_text(msg.UNHANDLED_ERROR)
+            elif update.effective_message:
+                await update.effective_message.reply_text(msg.UNHANDLED_ERROR)
+    except Exception:
+        logger.exception("Failed to deliver error notice to user")
 
 
 def _main_keyboard_for(user_id: int) -> ReplyKeyboardMarkup:
@@ -1396,7 +1405,10 @@ async def cmd_testlog(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text("✅ Test row written. Check the completions sheet.")
     except Exception as exc:
         logger.exception("Test log write failed")
-        await update.message.reply_text(f"❌ Logging failed: {_e(type(exc).__name__)}: {_e(str(exc))}")
+        await update.message.reply_text(
+            f"❌ Logging failed: {_e(type(exc).__name__)}: {_e(str(exc))}\n"
+            f"If this persists, contact {msg.ADMIN_CONTACT}."
+        )
 
 
 async def cmd_sync_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
