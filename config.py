@@ -49,6 +49,7 @@ STAFF_IDS: dict[int, str] = {
     433396623:  "Alisher",
     791356497:  "Gulrukh",
     873449279:  "Firdavs",
+    649925390:  "Madina",
     **TA_IDS,
 }
 
